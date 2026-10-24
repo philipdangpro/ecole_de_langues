@@ -1,0 +1,50 @@
+Premier aperçu des données (groupe 07, école de langues)
+Les 4 fichiers sont propres sur la forme : UTF-8, aucun identifiant en double, aucune date illisible, aucun champ numérique invalide. J'ai quand même trouvé 9 types de défauts volontaires, listés plus bas. Ce sont eux qui donneront vos contraintes nommées pour le L1.
+
+1. Contenu des fichiers
+Fichier	Lignes	Colonnes
+campus.csv	4	id_campus, nom, ville, role (siège / site)
+etudiants.csv	21 544	id_etudiant, nom, prenom, email, telephone, ville, id_campus, date_inscription
+sessions.csv	47 619	id_session, libelle, categorie, id_campus, debut, duree_minutes, capacite, prix_unitaire
+inscriptions.csv	354 855	id_inscription, id_etudiant, id_session, date_inscription, nb_places, montant, statut, id_groupe
+Ce qui est sain :
+
+Campus : le siège (Paris, id 1) n'a ni étudiants ni sessions. Les étudiants sont répartis entre Tours (9 854), Angers (7 025) et Bordeaux (4 665). La ville de l'étudiant correspond toujours à son campus.
+Sessions :
+6 catégories de taille équivalente : FLE, anglais, espagnol, allemand, italien, chinois ;
+durée toujours parmi 45, 60, 90 ou 120 min ;
+capacité de 8 à 16 places, prix de 150 à 600 € ;
+début entre 8h et 21h45, par pas d'un quart d'heure ;
+période couverte : 2025-01-01 → 2026-12-31.
+Inscriptions : nb_places vaut toujours 1. Le statut est CONFIRMEE pour 326 837 lignes et ANNULEE pour 28 018. Le remplissage moyen des sessions est de 57 %.
+Téléphones : tous au format 0XXXXXXXXX.
+Pic de rentrée visible : environ 14 500 inscriptions par mois en temps normal, et 25 717 en septembre 2026 (près du double).
+Mobilité : 22 961 inscriptions (6,5 %) portent sur une session d'un autre campus que celui de l'étudiant.
+2. Défauts détectés
+#	Défaut	Volume	Traitement que je propose
+1	Doublons d'étudiants : même personne recopiée avec l'email en MAJUSCULES ou avec des espaces (ex. id 482 et 21494, KARIM.GIRARD482@EXAMPLE.ORG)	73 paires, 359 inscriptions rattachées aux copies	Fusion vers l'id d'origine + rejet tracé. Contrainte uq_etudiant_email sur l'email normalisé (minuscules, sans espaces)
+2	Email vide	32 étudiants	Selon votre règle de gestion : email obligatoire (NOT NULL) ou facultatif. À trancher
+3	Session inexistante (id_session > 47 619)	220 inscriptions	Refus par la clé étrangère fk_inscription_session, lignes envoyées dans une table de rejets
+4	Montant négatif (−prix)	80 (74 confirmées, 6 annulées)	ck_inscription_montant CHECK (montant >= 0). Correction possible par la valeur absolue, à tracer
+5	Montant ≠ nb_places × prix_unitaire	les 80 mêmes lignes	Règle de cohérence (trigger ou vérification au chargement)
+6	Inscription après le début de la session	97 (repérables : leurs secondes valent toujours :00)	Trigger ou rejet tracé
+7	Inscription avant la création du compte étudiant	126	Trigger ou rejet tracé
+8	Même étudiant inscrit deux fois (confirmé) à la même session	154 couples	Unicité de (étudiant, session) parmi les inscriptions confirmées : index unique partiel ou trigger
+9	Surréservation : plus d'inscrits confirmés que de places	15 sessions (ex. session 2518 : 10 inscrits pour 8 places)	Trigger de contrôle de capacité. C'est aussi le cœur du sujet « pic de rentrée »
+Points étranges à creuser :
+
+Groupes (id_groupe, format G00001) : 2 667 parcours de 2 à 4 inscriptions.
+Seulement 1 246 couvrent 3 campus et 628 en couvrent 2. Les 793 restants n'ont qu'un seul campus, ce qui n'est pas un parcours multi-campus au sens du sujet.
+9 groupes mélangent plusieurs étudiants (ex. 21438 et 21532), ce qui est sans doute un défaut.
+Dans 1 559 groupes, les dates d'opération diffèrent, avec un écart médian d'environ 65 jours. Cela contredit l'idée d'une opération « passée en une fois ».
+Aucun groupe ne mélange confirmées et annulées.
+Une inscription datée 2027-01-02 alors qu'aucune session ne commence en 2027.
+Les annulations gardent un montant > 0. Il faut décider ce que vaut le montant d'une annulation : remboursement ? avoir ?
+Le LISEZMOI renvoie aux « valeurs de contrôle » définies dans le sujet. Pensez à les comparer à ces chiffres.
+3. Pistes pour le L1
+Association porteuse : INSCRIPTION entre ETUDIANT et SESSION, qui porte la date, le montant, le statut et le nombre de places.
+Héritage : CAMPUS décliné en SIEGE et SITE (la colonne role le montre déjà). On peut aussi spécialiser SESSION par catégorie de langue.
+Réflexive (option qui enrichit le modèle) : une session prérequise pour une autre (niveau A1 → A2), ou un parrainage entre étudiants. Ce sont des ajouts, ce qui est autorisé.
+Parcours : faire de id_groupe une vraie entité PARCOURS (1 étudiant, N inscriptions, règle « au moins 2 campus »). Cela rend votre opération multi-sites explicite.
+Règles de gestion déjà disponibles : les défauts n° 1 à 9 en donnent environ 9. En ajoutant les domaines (durée, capacité, prix, statut, siège sans sessions) et la règle du parcours, vous dépassez facilement les 12.
+Les deux scripts d'analyse sont dans C:\Users\bgerb\AppData\Local\Temp\claude\c--ProjetDataStorage-donnees-groupe-07\ed17672a-1283-403e-baf0-b6ece3aac099\scratchpad\prof.py et C:\Users\bgerb\AppData\Local\Temp\claude\c--ProjetDataStorage-donnees-groupe-07\ed17672a-1283-403e-baf0-b6ece3aac099\scratchpad\p2.py, si vous voulez les relancer. Je peux maintenant rédiger les règles de gestion ou le script de création des tables.
