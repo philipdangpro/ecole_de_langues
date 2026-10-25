@@ -1,7 +1,6 @@
 -- =====================================================================
 -- 01_creation_tables.sql
 -- Livrable : L1 · Modèle
--- Responsable : Baptiste
 -- Rôle     : crée les 7 tables du modèle et 2 vues, avec toutes les contraintes nommées.
 --            Modèle et règles de gestion (RG1 à RG16) : docs/L1_modele/L1_modele.md
 --            Description colonne par colonne : docs/L1_modele/L1_schema_relationnel.md
