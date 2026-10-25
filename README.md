@@ -16,6 +16,7 @@ Plateforme de données d'une école de langues : un siège (Paris) et trois site
 ├── nosql/                   MongoDB (L6, L7) et le second moteur (L7)
 ├── docs/
 │   ├── analyse/             premier aperçu des données et des défauts
+│   ├── comptes_rendus/      ce qui a été fait à chaque étape, et comment le justifier
 │   ├── L1_modele/           règles de gestion, MCD, schéma relationnel
 │   ├── L3_normalisation/    DF, décomposition, dénormalisation
 │   ├── L8_adr/              les deux ADR
@@ -24,33 +25,52 @@ Plateforme de données d'une école de langues : un siège (Paris) et trois site
 └── preuves/                 sorties à garder : plans d'exécution, blocs lus, captures
 ```
 
+## Installation sur un kit neuf (une seule fois)
+
+Le kit du cours (Oracle Free, conteneur `oracle-bdd`) ne crée que le compte `club`. Notre projet travaille dans le schéma **`langues`** (mot de passe `langues`), et le chargement lit les CSV directement dans le conteneur. Depuis la racine du dépôt, dans **PowerShell** :
+
+```powershell
+# 1. copier les CSV dans le conteneur
+docker exec oracle-bdd mkdir -p /opt/oracle/donnees_langues
+docker cp data/. oracle-bdd:/opt/oracle/donnees_langues/
+
+# 2. créer l'utilisateur langues et le dossier Oracle (compte administrateur du kit)
+docker cp sql/installation_system.sql oracle-bdd:/tmp/installation_system.sql
+docker exec oracle-bdd sqlplus -s system/oracle@//localhost:1521/FREEPDB1 "@/tmp/installation_system.sql"
+```
+
+(Ne pas passer le script par `Get-Content ... |` : PowerShell 5.1 ajoute un caractère invisible en tête et abîme les accents.)
+
+(Dans SQL Developer, l'étape 2 revient à ouvrir `sql/installation_system.sql` avec une connexion `system` / `oracle`, service `FREEPDB1`, puis F5.)
+
+> Sous Git Bash, préfixer les commandes `docker` par `MSYS_NO_PATHCONV=1` : sinon le chemin `/opt/...` est réécrit en chemin Windows et la copie échoue sans message.
+
 ## Ordre d'exécution des scripts Oracle
 
-Tout se relance de zéro avec un seul fichier, depuis le dossier `sql/` :
+Tout se relance de zéro avec un seul fichier, connecté en **`langues` / `langues`**, service `FREEPDB1` :
 
-```
-sqlplus utilisateur/motdepasse@//localhost:1521/FREEPDB1 @run_all.sql
-```
+- dans SQL Developer (ou l'extension SQL Developer de VS Code) : ouvrir `sql/run_all.sql` puis **Exécuter le script (F5)** ;
+- ou en ligne de commande, depuis le dossier `sql/` : `sqlplus langues/langues@//localhost:1521/FREEPDB1 @run_all.sql`.
 
-ou dans SQL Developer : ouvrir `sql/run_all.sql` puis **Exécuter le script (F5)**.
-
-| Ordre | Script | Livrable | Responsable |
+| Ordre | Script | Livrable |
 |---|---|---|---|
-| 00 | `00_nettoyage.sql` | supprime tout pour repartir de zéro | à définir |
-| 01 | `01_creation_tables.sql` | L1 · tables et contraintes nommées | à définir |
-| 02 | `02_chargement.sql` | L2 · chargement des CSV et traitement des défauts | à définir |
-| 03 | `03_valeurs_controle.sql` | L2 · valeurs C1 à C9 | à définir |
-| 04 | `04_requetes_metier.sql` | L2 · 10 requêtes métier | à définir |
-| 05 | `05_normalisation.sql` | L3 · table à plat et dénormalisation | à définir |
-| 06 | `06_triggers.sql` | L4 · triggers et journal d'audit | à définir |
-| 07 | `07_package_parcours.sql` | L4 · parcours multi-sites tout ou rien | à définir |
-| 08 | `08_performance.sql` | L5 · requêtes lentes, index, vue matérialisée | à définir |
-| 09 | `09_securite.sql` | L5 · rôle, vue de restriction, VPD / masquage / audit | à définir |
-| 10 | `10_distribution.sql` | L6 · fragmentation par site, db links, vues globales | à définir |
-| 11 | `11_bonus_objet.sql` | bonus objet-relationnel (optionnel, +2 points) | à définir |
+| 00 | `00_nettoyage.sql` | supprime tout pour repartir de zéro |
+| 01 | `01_creation_tables.sql` | L1 · tables et contraintes nommées |
+| 02 | `02_chargement.sql` | L2 · chargement des CSV et traitement des défauts |
+| 03 | `03_valeurs_controle.sql` | L2 · valeurs C1 à C9 |
+| 04 | `04_requetes_metier.sql` | L2 · 10 requêtes métier |
+| 05 | `05_normalisation.sql` | L3 · table à plat et dénormalisation |
+| 06 | `06_triggers.sql` | L4 · triggers et journal d'audit |
+| 07 | `07_package_parcours.sql` | L4 · parcours multi-sites tout ou rien |
+| 08 | `08_performance.sql` | L5 · requêtes lentes, index, vue matérialisée |
+| 09 | `09_securite.sql` | L5 · rôle, vue de restriction, VPD / masquage / audit |
+| 10 | `10_distribution.sql` | L6 · fragmentation par site, db links, vues globales |
+| 11 | `11_bonus_objet.sql` | bonus objet-relationnel (optionnel, +2 points) |
 
 Scripts lancés **à la main**, hors `run_all.sql` :
 
+- `installation_system.sql` : une seule fois, en `system`, avant tout le reste (voir plus haut).
+- `preuves/L1_tests_contraintes.sql` : juste après `01_creation_tables.sql`, sur des tables vides ; montre que chaque contrainte refuse les mauvaises données, puis annule tout. Sortie : `preuves/L1_tests_contraintes.txt`.
 - `L4_concurrence_session_A.sql` et `L4_concurrence_session_B.sql` : anomalie de concurrence, deux connexions ouvertes en même temps.
 - `L6_panne_reprise.sql` : scénario de panne d'un site et reprise.
 
