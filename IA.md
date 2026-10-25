@@ -12,7 +12,7 @@ Chacun complète au fur et à mesure.
 
 ## Ce qu'on a gardé, ce qu'on a corrigé
 
-- Gardé : Chaque contrainte a été vérifiée par un test qui doit échouer (`preuves/L1_tests_contraintes.txt`).
+- Gardé : Chaque contrainte a été vérifiée par un test qui doit échouer.
 - Corrigé : trois tests du script de preuve (voir ci-dessous) et la commande d'installation sous PowerShell (BOM).
 
 ## Au moins un cas où l'IA s'est trompée

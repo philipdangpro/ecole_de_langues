@@ -224,3 +224,7 @@ __marimo__/
 sql/*.log
 *.bak
 ~$*
+
+# Tests de contraintes du L1 : gardés en local seulement
+preuves/L1_tests_contraintes.sql
+preuves/L1_tests_contraintes.txt
