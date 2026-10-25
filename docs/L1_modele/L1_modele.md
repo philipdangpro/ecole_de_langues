@@ -60,7 +60,6 @@ INSCRIPTION(#id_inscription, id_etudiant → ETUDIANT, id_session → SESSION_CO
 Voir [`sql/01_creation_tables.sql`](../../sql/01_creation_tables.sql) (Oracle 23ai Free du kit) : toutes les contraintes sont nommées (`pk_`, `fk_`, `uq_`, `ck_`, `nn_`). La table s'appelle `SESSION_COURS` parce que `SESSION` est un mot réservé Oracle. Les index sur clés étrangères sont laissés à L5.
 
 Description colonne par colonne et justification des choix : [`L1_schema_relationnel.md`](L1_schema_relationnel.md).
-Preuve que les contraintes refusent les mauvaises données : [`preuves/L1_tests_contraintes.txt`](../../preuves/L1_tests_contraintes.txt).
 
 ## 6. Reporté à plus tard
 

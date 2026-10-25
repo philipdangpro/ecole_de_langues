@@ -70,7 +70,6 @@ Tout se relance de zéro avec un seul fichier, connecté en **`langues` / `langu
 Scripts lancés **à la main**, hors `run_all.sql` :
 
 - `installation_system.sql` : une seule fois, en `system`, avant tout le reste (voir plus haut).
-- `preuves/L1_tests_contraintes.sql` : juste après `01_creation_tables.sql`, sur des tables vides ; montre que chaque contrainte refuse les mauvaises données, puis annule tout. Sortie : `preuves/L1_tests_contraintes.txt`.
 - `L4_concurrence_session_A.sql` et `L4_concurrence_session_B.sql` : anomalie de concurrence, deux connexions ouvertes en même temps.
 - `L6_panne_reprise.sql` : scénario de panne d'un site et reprise.
 
