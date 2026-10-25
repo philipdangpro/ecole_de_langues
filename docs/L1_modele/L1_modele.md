@@ -34,10 +34,8 @@ Les règles RG13 à RG15 valent pour les **nouvelles** opérations. Les données
 
 ## 3. Schéma entité-association
 
-![MCD](L1_mcd.svg)
-
 - **Héritage** : `CAMPUS` se décline en `SIEGE` et `SITE`. Les étudiants et les sessions pointent vers `SITE`, donc « le siège n'a ni étudiants ni sessions » est garanti par une clé étrangère.
-- **Association réflexive** : `PARRAINER` sur `ETUDIANT` (un parrain, plusieurs filleuls). Absente des CSV : la colonne démarre vide, c'est un ajout autorisé.
+- **Association réflexive** : `PARRAINER` sur `ETUDIANT` (un parrain, plusieurs filleuls). 
 - **Association porteuse** : `INSCRIRE` entre `ETUDIANT` (0,n) et `SESSION_COURS` (0,n). Elle porte date, places, montant, statut et `id_groupe`. Elle a un identifiant propre, car un étudiant peut avoir plusieurs inscriptions à la même session (annulation puis réinscription) et que l'audit (L4) doit viser une inscription précise.
 
 ## 4. Schéma relationnel (`#` = clé primaire, `→` = clé étrangère)
@@ -59,7 +57,9 @@ INSCRIPTION(#id_inscription, id_etudiant → ETUDIANT, id_session → SESSION_CO
 
 ## 5. Script de création
 
-Voir `L1_creation.sql` (Oracle 19c+) : toutes les contraintes sont nommées (`pk_`, `fk_`, `uq_`, `ck_`, `nn_`). La table s'appelle `SESSION_COURS` parce que `SESSION` est un mot réservé Oracle. Les index sur clés étrangères sont laissés à L5.
+Voir [`sql/01_creation_tables.sql`](../../sql/01_creation_tables.sql) (Oracle 23ai Free du kit) : toutes les contraintes sont nommées (`pk_`, `fk_`, `uq_`, `ck_`, `nn_`). La table s'appelle `SESSION_COURS` parce que `SESSION` est un mot réservé Oracle. Les index sur clés étrangères sont laissés à L5.
+
+Description colonne par colonne et justification des choix : [`L1_schema_relationnel.md`](L1_schema_relationnel.md).
 
 ## 6. Reporté à plus tard
 
