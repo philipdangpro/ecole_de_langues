@@ -225,6 +225,9 @@ sql/*.log
 *.bak
 ~$*
 
+# CSV générés par des scripts (ils se régénèrent, et pèsent jusqu'à 87 Mo)
+scripts/**/*.csv
+
 # Tests de contraintes du L1 : gardés en local seulement
 preuves/L1_tests_contraintes.sql
 preuves/L1_tests_contraintes.txt
