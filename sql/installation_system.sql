@@ -35,6 +35,37 @@ GRANT CREATE SESSION, CREATE TABLE, CREATE VIEW, CREATE SEQUENCE, CREATE PROCEDU
 -- Lecture du dictionnaire (plans d'exécution, statistiques : L5)
 GRANT SELECT_CATALOG_ROLE TO langues;
 
+-- L5 (sécurité, 09_securite.sql) :
+--   - CREATE ROLE : langues crée les rôles du L5 et les donne aux comptes ci-dessous
+--     (le créateur d'un rôle peut le donner) ;
+--   - DBMS_RLS : sécurité par ligne (Virtual Private Database). system ne peut pas
+--     donner directement EXECUTE ON SYS.DBMS_RLS (ORA-01031) : seuls des rôles l'ont.
+--     On prend DB_DEVELOPER_ROLE, le rôle « développeur » d'Oracle 23ai, qui le contient.
+-- On ne donne PAS CREATE USER à langues : créer des comptes reste le travail de
+-- l'administrateur, d'où les comptes créés ici.
+GRANT CREATE ROLE TO langues;
+GRANT DB_DEVELOPER_ROLE TO langues;
+
+-- Comptes de démonstration du L5 (mot de passe = nom du compte) :
+--   agent_bordeaux, agent_tours : agents d'accueil d'un site, ne voient que leur site
+--   direction                   : siège, voit tous les sites mais aucune donnée personnelle
+-- Ils n'ont que le droit de se connecter : leurs droits de lecture viennent des rôles
+-- donnés par 09_securite.sql.
+CREATE USER IF NOT EXISTS agent_bordeaux IDENTIFIED BY "agent_bordeaux";
+CREATE USER IF NOT EXISTS agent_tours    IDENTIFIED BY "agent_tours";
+CREATE USER IF NOT EXISTS direction      IDENTIFIED BY "direction";
+GRANT CREATE SESSION TO agent_bordeaux, agent_tours, direction;
+
+-- L6 (distribution, 10_distribution.sql) : un compte par site, qui joue le rôle de la
+-- base locale du site (mot de passe = nom du compte). Dans la réalité, ce seraient trois
+-- serveurs ; ici, trois schémas de la même base, reliés à langues (le siège) par des
+-- liens de base de données. Le siège y crée et remplit les fragments à distance : ces
+-- comptes n'ont besoin que de se connecter et de créer leurs propres tables.
+CREATE USER IF NOT EXISTS site_bordeaux IDENTIFIED BY "site_bordeaux" QUOTA UNLIMITED ON USERS;
+CREATE USER IF NOT EXISTS site_tours    IDENTIFIED BY "site_tours"    QUOTA UNLIMITED ON USERS;
+CREATE USER IF NOT EXISTS site_angers   IDENTIFIED BY "site_angers"   QUOTA UNLIMITED ON USERS;
+GRANT CREATE SESSION, CREATE TABLE TO site_bordeaux, site_tours, site_angers;
+
 -- Dossier du conteneur où sont copiés les CSV (étape 1 ci-dessus)
 CREATE OR REPLACE DIRECTORY dir_donnees_langues AS '/opt/oracle/donnees_langues';
 GRANT READ ON DIRECTORY dir_donnees_langues TO langues;
