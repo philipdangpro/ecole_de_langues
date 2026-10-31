@@ -21,6 +21,6 @@ SPOOL run_all.log
 @@08_performance.sql
 @@09_securite.sql
 @@10_distribution.sql
--- @@11_bonus_objet.sql          -- optionnel (bonus +2)
+@@11_bonus_objet.sql
 
 SPOOL OFF

@@ -26,13 +26,17 @@
 --   CATEGORIE      répliquée dans chaque site (6 lignes, ne change pas) : la clé
 --                  étrangère session -> catégorie reste locale
 --   CAMPUS, SIEGE, SITE : restent au siège (référentiel de l'organisation)
+--   SESSION_REPLIQUE : copie redondante, au siège, des sessions d'Angers (partie 4 bis).
+--                  Elle sert de secours quand Angers est en panne (bascule), et les
+--                  conflits entre la copie et le site sont réglés par « le dernier
+--                  écrivain gagne » (colonne derniere_maj), comme au Lab 5.
 --
 -- Les tables centrales de langues (L1 à L5) sont gardées : elles servent de référence
 -- pour prouver que la fragmentation est complète, disjointe et reconstructible, et les
 -- scripts des livrables précédents en ont besoin. Les nouvelles opérations réparties
 -- (pkg_reparti) n'écrivent que dans les fragments.
 --
--- Codes d'erreur pris par le L6 : -20020 à -20025.
+-- Codes d'erreur pris par le L6 : -20020 à -20026.
 -- Panne et reprise d'un site : sql/L6_panne_reprise.sql (à lancer à la main).
 -- =====================================================================
 
@@ -55,21 +59,6 @@ CREATE TABLE catalogue_site (
 INSERT INTO catalogue_site VALUES (2, 'Bordeaux', 'SITE_BORDEAUX', 'LIEN_BORDEAUX');
 INSERT INTO catalogue_site VALUES (3, 'Tours',    'SITE_TOURS',    'LIEN_TOURS');
 INSERT INTO catalogue_site VALUES (4, 'Angers',   'SITE_ANGERS',   'LIEN_ANGERS');
-
--- Description des fragments (sert au rapport et à la vérification ci-dessous)
-CREATE TABLE catalogue_fragment (
-    table_globale  VARCHAR2(30 CHAR)   CONSTRAINT nn_catfrag_table  NOT NULL,
-    type_repart    VARCHAR2(20 CHAR)   CONSTRAINT nn_catfrag_type   NOT NULL,
-    predicat       VARCHAR2(100 CHAR)  CONSTRAINT nn_catfrag_pred   NOT NULL,
-    CONSTRAINT pk_catalogue_fragment PRIMARY KEY (table_globale),
-    CONSTRAINT ck_catfrag_type CHECK (type_repart IN ('HORIZONTALE', 'REPLIQUEE', 'SIEGE'))
-);
-
-INSERT INTO catalogue_fragment VALUES ('SESSION_COURS', 'HORIZONTALE', 'id_campus = site du fragment');
-INSERT INTO catalogue_fragment VALUES ('INSCRIPTION',   'HORIZONTALE', 'id_site = site du fragment (site de la session, L3)');
-INSERT INTO catalogue_fragment VALUES ('ETUDIANT',      'HORIZONTALE', 'id_campus = site du fragment (site de rattachement)');
-INSERT INTO catalogue_fragment VALUES ('CATEGORIE',     'REPLIQUEE',   'copie complète dans chaque site');
-INSERT INTO catalogue_fragment VALUES ('CAMPUS',        'SIEGE',       'pas de fragment : référentiel du siège (avec SIEGE et SITE)');
 COMMIT;
 
 
@@ -100,7 +89,7 @@ CREATE DATABASE LINK lien_angers   CONNECT TO site_angers   IDENTIFIED BY "site_
 --      - inscription.id_etudiant -> etudiant : 22 955 inscriptions (6,5 %) concernent un
 --        étudiant rattaché à un autre site ;
 --      - unicité de l'e-mail entre sites ; parrain d'un autre site.
---    Elles sont vérifiées par les requêtes de contrôle de la partie 6.
+--    Elles sont vérifiées par les requêtes de contrôle de la partie 7.
 -- ---------------------------------------------------------------------
 DECLARE
     PROCEDURE ddl (p_lien VARCHAR2, p_ordre VARCHAR2) IS
@@ -149,6 +138,8 @@ BEGIN
                 duree_minutes  NUMBER(3)          CONSTRAINT nn_session_duree     NOT NULL,
                 capacite       NUMBER(3)          CONSTRAINT nn_session_capacite  NOT NULL,
                 prix_unitaire  NUMBER(7,2)        CONSTRAINT nn_session_prix      NOT NULL,
+                derniere_maj   TIMESTAMP DEFAULT SYSTIMESTAMP
+                                                  CONSTRAINT nn_session_maj       NOT NULL,
                 CONSTRAINT pk_session           PRIMARY KEY (id_session),
                 CONSTRAINT fk_session_categorie FOREIGN KEY (id_categorie)
                                                 REFERENCES categorie (id_categorie),
@@ -220,6 +211,51 @@ END;
 
 
 -- ---------------------------------------------------------------------
+-- 4 bis. Redondance : une copie des sessions d'Angers au siège
+--    Démarche du Lab 5 (partie 5, VOYAGE_NORD_REPLIQUE), appliquée à notre école.
+--    Pourquoi SESSION_COURS : c'est le catalogue, lu à chaque consultation et à chaque
+--    inscription, mais rarement modifié (création d'une session, changement de prix
+--    ou de salle). Une copie coûte donc peu à tenir à jour. Les inscriptions, elles,
+--    changent sans arrêt : on ne les recopie pas (la file d'attente s'en charge).
+--    Pourquoi Angers seulement : c'est le site dont on simule la panne ; pour les autres
+--    sites, ce serait la même table avec leurs lignes (colonne id_campus).
+--
+--    Mise à jour de la copie : différée, par pkg_reparti.synchroniser_replique (à la
+--    reprise après une panne, et en temps normal à intervalle régulier, par exemple
+--    chaque nuit). Chaque ligne porte la date de sa dernière modification
+--    (derniere_maj, aussi dans les fragments) : quand la même session a été modifiée
+--    des deux côtés, la modification la plus récente l'emporte (« le dernier écrivain
+--    gagne »). Cela suppose des horloges synchronisées : ici, c'est la même instance.
+-- ---------------------------------------------------------------------
+CREATE TABLE session_replique (
+    id_session     NUMBER(8)          CONSTRAINT nn_repl_id        NOT NULL,
+    libelle        VARCHAR2(80 CHAR)  CONSTRAINT nn_repl_libelle   NOT NULL,
+    id_categorie   NUMBER(4)          CONSTRAINT nn_repl_categorie NOT NULL,
+    id_campus      NUMBER(4)          CONSTRAINT nn_repl_campus    NOT NULL,
+    debut          DATE               CONSTRAINT nn_repl_debut     NOT NULL,
+    duree_minutes  NUMBER(3)          CONSTRAINT nn_repl_duree     NOT NULL,
+    capacite       NUMBER(3)          CONSTRAINT nn_repl_capacite  NOT NULL,
+    prix_unitaire  NUMBER(7,2)        CONSTRAINT nn_repl_prix      NOT NULL,
+    derniere_maj   TIMESTAMP          CONSTRAINT nn_repl_maj       NOT NULL,
+    CONSTRAINT pk_session_replique PRIMARY KEY (id_session),
+    CONSTRAINT fk_repl_site        FOREIGN KEY (id_campus) REFERENCES catalogue_site (id_site),
+    CONSTRAINT ck_repl_capacite    CHECK (capacite > 0),
+    CONSTRAINT ck_repl_prix        CHECK (prix_unitaire >= 0)
+);
+
+COMMENT ON TABLE session_replique IS 'L6 : copie redondante des sessions d''Angers, lue pendant une panne du site (pkg_reparti.consulter_sessions), resynchronisée par pkg_reparti.synchroniser_replique (le dernier écrivain gagne).';
+
+-- Remplie depuis le fragment d'Angers lui-même, à travers le lien : la copie part avec
+-- les mêmes dates derniere_maj que le site
+INSERT INTO session_replique (id_session, libelle, id_categorie, id_campus, debut,
+                              duree_minutes, capacite, prix_unitaire, derniere_maj)
+SELECT id_session, libelle, id_categorie, id_campus, debut,
+       duree_minutes, capacite, prix_unitaire, derniere_maj
+FROM   session_cours@lien_angers;
+COMMIT;
+
+
+-- ---------------------------------------------------------------------
 -- 5. Vues globales (au siège) : la reconstruction des tables par UNION ALL
 --    Chaque branche répète le prédicat de son fragment (WHERE id_site = 2…). Il est
 --    déjà vrai pour toutes les lignes du fragment, mais l'optimiseur du siège ne voit
@@ -278,8 +314,10 @@ SELECT id_etudiant, id_campus AS id_site FROM etudiant;
 --    - inscrire : une inscription simple. Si le site est en panne, elle est mise en
 --      attente au siège (OPERATION_EN_ATTENTE) et rejouée à la reprise.
 --    - rejouer_attente : la reprise, qui revérifie la capacité au moment du rejeu.
---    - nb_inscriptions / ca_site : lectures site par site, qui renvoient NULL pour un
---      site en panne au lieu de faire échouer toute la requête (mode dégradé).
+--    - consulter_sessions : lit le catalogue d'un site ; s'il est en panne, bascule sur
+--      la copie du siège (SESSION_REPLIQUE), comme CONSULTER_VOYAGES_NORD au Lab 5.
+--    - synchroniser_replique : remet la copie et le site d'accord, dans les deux sens ;
+--      en cas de conflit, la modification la plus récente gagne.
 --    Les liens sont choisis à l'exécution (SQL dynamique) : le package reste valide même
 --    quand un site est en panne.
 -- ---------------------------------------------------------------------
@@ -310,10 +348,6 @@ CREATE OR REPLACE PACKAGE pkg_reparti AS
     -- arrêté, connexion coupée…)
     FUNCTION erreur_de_lien (p_code IN NUMBER) RETURN BOOLEAN;
 
-    -- Mode dégradé : NULL si le site ne répond pas
-    FUNCTION nb_inscriptions (p_id_site IN NUMBER) RETURN NUMBER;
-    FUNCTION ca_site         (p_id_site IN NUMBER) RETURN NUMBER;
-
     -- Parcours multi-sites sur les fragments : tout ou rien, refuse la sur-réservation
     -- et refuse tout le parcours si un des sites est injoignable. COMMIT par l'appelant.
     PROCEDURE inscrire_parcours (
@@ -337,6 +371,25 @@ CREATE OR REPLACE PACKAGE pkg_reparti AS
     -- Une opération qui n'a plus de place est REFUSEE (avec son motif), pas forcée.
     PROCEDURE rejouer_attente (p_id_site IN NUMBER);
 
+    -- Catalogue d'un site : les p_nb_max prochaines sessions à partir de p_a_partir_de,
+    -- affichées par DBMS_OUTPUT. p_source = 'SITE' (lu dans le site) ou 'REPLIQUE'
+    -- (site en panne : lu dans la copie du siège). -20026 si le site est en panne et
+    -- n'a pas de copie.
+    PROCEDURE consulter_sessions (
+        p_id_site      IN  NUMBER,
+        p_a_partir_de  IN  DATE,
+        p_nb_max       IN  NUMBER DEFAULT 5,
+        p_source       OUT VARCHAR2);
+
+    -- Resynchronise la copie d'un site avec son fragment (le dernier écrivain gagne).
+    -- p_vers_site : lignes recopiées de la copie vers le site (plus récentes au siège) ;
+    -- p_vers_replique : lignes recopiées du site vers la copie. COMMIT par l'appelant
+    -- (validation à deux phases : le siège et le site sont modifiés ensemble).
+    PROCEDURE synchroniser_replique (
+        p_id_site        IN  NUMBER,
+        p_vers_site      OUT NUMBER,
+        p_vers_replique  OUT NUMBER);
+
 END pkg_reparti;
 /
 
@@ -356,9 +409,9 @@ CREATE OR REPLACE PACKAGE BODY pkg_reparti AS
     FUNCTION erreur_de_lien (p_code IN NUMBER) RETURN BOOLEAN IS
     BEGIN
         -- 28000 compte bloqué, 1017 mot de passe refusé, 2063/2068 erreur venue du lien,
-        -- 3113/3114/3135 connexion coupée, 12514/12541/12170 service ou réseau absent,
-        -- 2019 lien inconnu
-        RETURN p_code IN (-28000, -1017, -2063, -2068, -3113, -3114, -3135,
+        -- 3113/3114/3135/3150 connexion coupée, 12514/12541/12170 service ou réseau
+        -- absent, 2019 lien inconnu
+        RETURN p_code IN (-28000, -1017, -2063, -2068, -3113, -3114, -3135, -3150,
                           -12514, -12541, -12170, -2019);
     END erreur_de_lien;
 
@@ -371,31 +424,6 @@ CREATE OR REPLACE PACKAGE BODY pkg_reparti AS
     EXCEPTION
         WHEN OTHERS THEN NULL;   -- lien déjà fermé, ou transaction en cours
     END fermer_lien;
-
-
-    FUNCTION nb_inscriptions (p_id_site IN NUMBER) RETURN NUMBER IS
-        v_nb NUMBER;
-    BEGIN
-        EXECUTE IMMEDIATE 'SELECT COUNT(*) FROM inscription@' || lien(p_id_site) INTO v_nb;
-        RETURN v_nb;
-    EXCEPTION
-        WHEN OTHERS THEN
-            IF erreur_de_lien(SQLCODE) THEN RETURN NULL; END IF;
-            RAISE;
-    END nb_inscriptions;
-
-
-    FUNCTION ca_site (p_id_site IN NUMBER) RETURN NUMBER IS
-        v_ca NUMBER;
-    BEGIN
-        EXECUTE IMMEDIATE 'SELECT NVL(SUM(montant), 0) FROM inscription@' || lien(p_id_site)
-            || ' WHERE statut = ''CONFIRMEE''' INTO v_ca;
-        RETURN v_ca;
-    EXCEPTION
-        WHEN OTHERS THEN
-            IF erreur_de_lien(SQLCODE) THEN RETURN NULL; END IF;
-            RAISE;
-    END ca_site;
 
 
     -- Site d'une session, lu dans l'annuaire du siège (pas besoin que le site réponde)
@@ -575,6 +603,127 @@ CREATE OR REPLACE PACKAGE BODY pkg_reparti AS
         END LOOP;
     END rejouer_attente;
 
+
+    PROCEDURE consulter_sessions (
+        p_id_site      IN  NUMBER,
+        p_a_partir_de  IN  DATE,
+        p_nb_max       IN  NUMBER DEFAULT 5,
+        p_source       OUT VARCHAR2)
+    IS
+        TYPE t_ligne IS RECORD (id_session NUMBER, libelle VARCHAR2(80 CHAR), debut DATE,
+                                capacite NUMBER, prix_unitaire NUMBER);
+        TYPE t_lignes IS TABLE OF t_ligne;
+        v_lignes  t_lignes;
+        v_lien    catalogue_site.nom_lien%TYPE := lien(p_id_site);
+        v_code    NUMBER;
+        v_message VARCHAR2(512);
+    BEGIN
+        -- 1. Le site principal. Toutes les lignes sont lues dans ce bloc (BULK COLLECT) :
+        --    une coupure pendant la lecture fait aussi basculer. Le lien est écrit en SQL
+        --    dynamique : la procédure reste valide pendant la panne (piège PLS-00905
+        --    signalé au Lab 5).
+        BEGIN
+            EXECUTE IMMEDIATE 'SELECT id_session, libelle, debut, capacite, prix_unitaire'
+                || ' FROM session_cours@' || v_lien
+                || ' WHERE debut >= :d ORDER BY debut, id_session FETCH FIRST :n ROWS ONLY'
+                BULK COLLECT INTO v_lignes USING p_a_partir_de, p_nb_max;
+            p_source := 'SITE';
+        EXCEPTION
+            WHEN OTHERS THEN
+                v_code    := SQLCODE;
+                v_message := SQLERRM;
+                IF NOT erreur_de_lien(v_code) THEN RAISE; END IF;
+                fermer_lien(v_lien);
+                DBMS_OUTPUT.PUT_LINE('Site ' || p_id_site || ' injoignable : '
+                    || REPLACE(v_message, CHR(10), ' '));
+
+                -- 2. Bascule sur la copie du siège
+                SELECT id_session, libelle, debut, capacite, prix_unitaire
+                BULK COLLECT INTO v_lignes
+                FROM   session_replique
+                WHERE  id_campus = p_id_site AND debut >= p_a_partir_de
+                ORDER BY debut, id_session
+                FETCH FIRST p_nb_max ROWS ONLY;
+
+                IF v_lignes.COUNT = 0 THEN
+                    RAISE_APPLICATION_ERROR(-20026, 'Site ' || p_id_site
+                        || ' injoignable et sans copie au siège');
+                END IF;
+                DBMS_OUTPUT.PUT_LINE('Bascule sur la copie du siège (SESSION_REPLIQUE)');
+                p_source := 'REPLIQUE';
+        END;
+
+        DBMS_OUTPUT.PUT_LINE('Sessions du site ' || p_id_site || ' lues dans : ' || p_source);
+        FOR i IN 1 .. v_lignes.COUNT LOOP
+            DBMS_OUTPUT.PUT_LINE('  session ' || v_lignes(i).id_session || ', '
+                || TO_CHAR(v_lignes(i).debut, 'DD/MM/YYYY HH24:MI') || ', '
+                || v_lignes(i).libelle || ', ' || v_lignes(i).capacite || ' places, '
+                || TO_CHAR(v_lignes(i).prix_unitaire, 'FM99990.00') || ' EUR');
+        END LOOP;
+    END consulter_sessions;
+
+
+    PROCEDURE synchroniser_replique (
+        p_id_site        IN  NUMBER,
+        p_vers_site      OUT NUMBER,
+        p_vers_replique  OUT NUMBER)
+    IS
+        TYPE t_sessions IS TABLE OF session_replique%ROWTYPE;
+        v_plus_recentes t_sessions;
+        v_lien          catalogue_site.nom_lien%TYPE := lien(p_id_site);
+        v_code          NUMBER;
+        v_message       VARCHAR2(512);
+    BEGIN
+        -- 1. Sessions plus récentes dans la copie (modifiées au siège, par exemple pendant
+        --    une panne) : on les recopie dans le site
+        EXECUTE IMMEDIATE 'SELECT r.id_session, r.libelle, r.id_categorie, r.id_campus, r.debut,'
+            || ' r.duree_minutes, r.capacite, r.prix_unitaire, r.derniere_maj'
+            || ' FROM session_replique r JOIN session_cours@' || v_lien || ' s'
+            || ' ON s.id_session = r.id_session'
+            || ' WHERE r.id_campus = :site AND r.derniere_maj > s.derniere_maj'
+            BULK COLLECT INTO v_plus_recentes USING p_id_site;
+
+        FOR i IN 1 .. v_plus_recentes.COUNT LOOP
+            EXECUTE IMMEDIATE 'UPDATE session_cours@' || v_lien
+                || ' SET libelle = :l, id_categorie = :c, debut = :d, duree_minutes = :du,'
+                || ' capacite = :ca, prix_unitaire = :p, derniere_maj = :m'
+                || ' WHERE id_session = :id'
+                USING v_plus_recentes(i).libelle, v_plus_recentes(i).id_categorie,
+                      v_plus_recentes(i).debut, v_plus_recentes(i).duree_minutes,
+                      v_plus_recentes(i).capacite, v_plus_recentes(i).prix_unitaire,
+                      v_plus_recentes(i).derniere_maj, v_plus_recentes(i).id_session;
+        END LOOP;
+        p_vers_site := v_plus_recentes.COUNT;
+
+        -- 2. Sessions plus récentes dans le site, ou nouvelles : on les recopie au siège.
+        --    Les lignes recopiées à l'étape 1 ont maintenant la même date des deux côtés :
+        --    elles ne bougent plus.
+        EXECUTE IMMEDIATE 'MERGE INTO session_replique r'
+            || ' USING (SELECT id_session, libelle, id_categorie, id_campus, debut,'
+            || '               duree_minutes, capacite, prix_unitaire, derniere_maj'
+            || '        FROM session_cours@' || v_lien || ') s'
+            || ' ON (r.id_session = s.id_session)'
+            || ' WHEN MATCHED THEN UPDATE SET r.libelle = s.libelle, r.id_categorie = s.id_categorie,'
+            || '      r.debut = s.debut, r.duree_minutes = s.duree_minutes, r.capacite = s.capacite,'
+            || '      r.prix_unitaire = s.prix_unitaire, r.derniere_maj = s.derniere_maj'
+            || '      WHERE s.derniere_maj > r.derniere_maj'
+            || ' WHEN NOT MATCHED THEN INSERT (id_session, libelle, id_categorie, id_campus, debut,'
+            || '      duree_minutes, capacite, prix_unitaire, derniere_maj)'
+            || '      VALUES (s.id_session, s.libelle, s.id_categorie, s.id_campus, s.debut,'
+            || '      s.duree_minutes, s.capacite, s.prix_unitaire, s.derniere_maj)';
+        p_vers_replique := SQL%ROWCOUNT;
+    EXCEPTION
+        WHEN OTHERS THEN
+            v_code    := SQLCODE;
+            v_message := SQLERRM;
+            IF erreur_de_lien(v_code) THEN
+                fermer_lien(v_lien);
+                RAISE_APPLICATION_ERROR(-20020, 'Site ' || p_id_site
+                    || ' injoignable : synchronisation impossible (' || v_message || ')');
+            END IF;
+            RAISE;
+    END synchroniser_replique;
+
 END pkg_reparti;
 /
 
@@ -710,9 +859,21 @@ FROM  (SELECT sql_id, child_number FROM v$sql
 -- Résultat attendu : les branches de Bordeaux et d'Angers passent sous un FILTER
 -- « NULL IS NOT NULL » et ne sont jamais lancées (Starts = 0)
 
--- 7.7 Mode dégradé : lecture site par site (ici, les trois sites répondent)
-SELECT c.id_site, c.ville,
-       pkg_reparti.nb_inscriptions(c.id_site) AS inscriptions,
-       pkg_reparti.ca_site(c.id_site)         AS chiffre_affaires
-FROM   catalogue_site c
-ORDER BY c.id_site;
+-- 7.7 Redondance : la copie du siège est identique au fragment d'Angers (dates comprises)
+SELECT (SELECT COUNT(*) FROM session_replique) AS lignes_copie,
+       (SELECT COUNT(*) FROM session_cours@lien_angers) AS lignes_angers,
+       (SELECT COUNT(*) FROM (SELECT id_session, libelle, id_categorie, id_campus, debut,
+                                     duree_minutes, capacite, prix_unitaire, derniere_maj
+                              FROM session_cours@lien_angers
+                              MINUS SELECT * FROM session_replique)) AS ecarts
+FROM dual;
+-- Résultat attendu : 15 170, 15 170, 0 écart
+
+-- En temps normal, la consultation du catalogue lit le site lui-même (source SITE)
+SET SERVEROUTPUT ON
+DECLARE
+    v_source VARCHAR2(10);
+BEGIN
+    pkg_reparti.consulter_sessions(4, DATE '2026-12-01', 3, v_source);
+END;
+/

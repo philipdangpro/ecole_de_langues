@@ -13,7 +13,7 @@ Plateforme de données d'une école de langues : un siège (Paris) et trois site
 ├── LISEZMOI.txt             description des données fournie avec le zip
 ├── data/                    les 4 CSV d'origine — ne jamais les modifier
 ├── sql/                     tous les scripts Oracle, lancés par run_all.sql
-├── nosql/                   MongoDB (L6, L7) et le second moteur (L7)
+├── nosql/                   MongoDB shardé (L6), Elasticsearch et Neo4j (L7)
 ├── docs/
 │   ├── analyse/             premier aperçu des données et des défauts
 │   ├── comptes_rendus/      ce qui a été fait à chaque étape, et comment le justifier
@@ -34,7 +34,9 @@ Le kit du cours (Oracle Free, conteneur `oracle-bdd`) ne crée que le compte `cl
 docker exec oracle-bdd mkdir -p /opt/oracle/donnees_langues
 docker cp data/. oracle-bdd:/opt/oracle/donnees_langues/
 
-# 2. créer l'utilisateur langues et le dossier Oracle (compte administrateur du kit)
+# 2. créer l'utilisateur langues, ses droits, le dossier Oracle, les 3 comptes de test
+#    du L5 (agent_bordeaux, agent_tours, direction) et les 3 bases de site du L6
+#    (site_bordeaux, site_tours, site_angers), avec le compte administrateur du kit
 docker cp sql/installation_system.sql oracle-bdd:/tmp/installation_system.sql
 docker exec oracle-bdd sqlplus -s system/oracle@//localhost:1521/FREEPDB1 "@/tmp/installation_system.sql"
 ```
@@ -65,13 +67,16 @@ Tout se relance de zéro avec un seul fichier, connecté en **`langues` / `langu
 | 08 | `08_performance.sql` | L5 · requêtes lentes, index, vue matérialisée |
 | 09 | `09_securite.sql` | L5 · rôle, vue de restriction, VPD / masquage / audit |
 | 10 | `10_distribution.sql` | L6 · fragmentation par site, db links, vues globales |
-| 11 | `11_bonus_objet.sql` | bonus objet-relationnel (optionnel, +2 points) |
+| 11 | `11_bonus_objet.sql` | bonus objet-relationnel : type `t_campus` avec méthode, sous-type `t_site`, requête |
 
 Scripts lancés **à la main**, hors `run_all.sql` :
 
 - `installation_system.sql` : une seule fois, en `system`, avant tout le reste (voir plus haut).
 - `L4_concurrence_session_A.sql` et `L4_concurrence_session_B.sql` : anomalie de concurrence, deux connexions ouvertes en même temps.
-- `L6_panne_reprise.sql` : scénario de panne d'un site et reprise.
+- Preuves, après `run_all.sql` : `preuves/L4_tests_fiabilite.sql` (triggers et package), `preuves/L5_securite.sql` (ce que voit chaque compte ; il se connecte tour à tour avec `agent_bordeaux`, `agent_tours` et `direction`).
+- `L6_panne_reprise.sql` : panne du site d'Angers et reprise, étape par étape, en alternant les connexions `langues` et `system`.
+- MongoDB shardé (L6) : export depuis Oracle puis scripts `mongosh`, voir `nosql/mongodb/README.md`.
+- L7 : Elasticsearch (recherche d'un étudiant, `nosql/elasticsearch/README.md`) et Neo4j (recommandation de sessions, `nosql/neo4j/README.md`). Chacun part d'un export d'Oracle. Le kit demande de lancer un moteur à la fois (`docker compose --profile elasticsearch up -d`, puis `--profile neo4j`, dans `C:\bdd-kit\3-nosql`).
 
 ## Vocabulaire du sujet → nos données
 
