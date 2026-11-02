@@ -28,6 +28,20 @@ FROM ext_etudiants;
 -- Résultat : 21 544 lignes, 21 471 personnes (identique à C1 : la fusion est juste)
 
 
+
+-- ============================================================
+-- C3 : nombre d'operations valides confirmees
+-- ============================================================
+SELECT COUNT(*) AS c3
+FROM inscription i
+JOIN session_cours s
+  ON s.id_session = i.id_session
+WHERE i.statut = 'CONFIRMEE'
+  AND i.montant >= 0
+  AND i.date_operation <= s.debut;
+
+-- Resultat attendu : 326469
+
 -- ---------------------------------------------------------------------
 -- C4 : le jour où le plus d'opérations valides ont été passées, et leur nombre
 --    Toutes les opérations valides comptent (confirmées et annulées).
@@ -41,6 +55,25 @@ FETCH FIRST 1 ROWS ONLY;
 -- Résultat : 10/09/2026, 16 068 opérations
 --   Pas d'égalité : le jour suivant au classement en a 552. Le pic vient du CSV
 --   (16 082 lignes ce jour-là, dont 14 non valides), heures réparties sur toute la journée.
+
+
+-- ============================================================
+-- C6 : personnes ayant des operations valides
+--      sur au moins deux campus distincts
+-- ============================================================
+SELECT COUNT(*) AS c6
+FROM (
+    SELECT i.id_etudiant
+    FROM inscription i
+    JOIN session_cours s
+      ON s.id_session = i.id_session
+    WHERE i.montant >= 0
+      AND i.date_operation <= s.debut
+    GROUP BY i.id_etudiant
+    HAVING COUNT(DISTINCT s.id_campus) >= 2
+);
+
+-- Resultat attendu : 12356
 
 
 -- ---------------------------------------------------------------------
@@ -60,4 +93,34 @@ FROM (
     HAVING SUM(i.nb_places) > s.capacite
 );
 -- Résultat : 15 sessions (même chiffre avec la vue V_SESSION_OCCUPATION du L1)
+
+
+
+
+-- ============================================================
+-- C9 : nombre de places confirmees par categorie
+-- ============================================================
+SELECT 'C9' AS controle,
+       c.libelle AS categorie,
+       SUM(i.nb_places) AS places_confirmees
+FROM inscription i
+JOIN session_cours s
+  ON s.id_session = i.id_session
+JOIN categorie c
+  ON c.id_categorie = s.id_categorie
+WHERE i.statut = 'CONFIRMEE'
+  AND i.montant >= 0
+  AND i.date_operation <= s.debut
+GROUP BY c.libelle
+ORDER BY c.libelle;
+
+-- Resultats attendus :
+-- C9 | FLE      | 55104
+-- C9 | allemand | 52705
+-- C9 | anglais  | 54870
+-- C9 | chinois  | 54681
+-- C9 | espagnol | 54579
+-- C9 | italien  | 54530
+-- Total       : 326469
+
 
