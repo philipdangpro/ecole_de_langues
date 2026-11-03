@@ -28,6 +28,20 @@ FROM ext_etudiants;
 -- Résultat : 21 544 lignes, 21 471 personnes (identique à C1 : la fusion est juste)
 
 
+
+-- ============================================================
+-- C3 : nombre d'operations valides confirmees
+-- ============================================================
+SELECT COUNT(*) AS c3
+FROM inscription i
+JOIN session_cours s
+  ON s.id_session = i.id_session
+WHERE i.statut = 'CONFIRMEE'
+  AND i.montant >= 0
+  AND i.date_operation <= s.debut;
+
+-- Resultat attendu : 326469
+
 -- ---------------------------------------------------------------------
 -- C2 : nombre d'opérations non valides, et leur répartition par motif
 -- ---------------------------------------------------------------------
@@ -61,6 +75,25 @@ where statut = 'CONFIRMEE' group by i.id_site;
 -- 39082945	4
 -- 56080982	3
 
+-- ============================================================
+-- C6 : personnes ayant des operations valides
+--      sur au moins deux campus distincts
+-- ============================================================
+SELECT COUNT(*) AS c6
+FROM (
+    SELECT i.id_etudiant
+    FROM inscription i
+    JOIN session_cours s
+      ON s.id_session = i.id_session
+    WHERE i.montant >= 0
+      AND i.date_operation <= s.debut
+    GROUP BY i.id_etudiant
+    HAVING COUNT(DISTINCT s.id_campus) >= 2
+);
+
+-- Resultat attendu : 12356
+
+
 -- ---------------------------------------------------------------------
 -- C7 : nombre de sessions en sur-réservation
 --    Pour chaque session : somme des places des inscriptions confirmées, comparée à sa
@@ -86,5 +119,33 @@ select count(*) from (
 select id_groupe 
 from inscription where id_groupe is not null and statut = 'CONFIRMEE'
 group by id_groupe having count(distinct(id_site)) >= 2);
+
+
+
+-- ============================================================
+-- C9 : nombre de places confirmees par categorie
+-- ============================================================
+SELECT 'C9' AS controle,
+       c.libelle AS categorie,
+       SUM(i.nb_places) AS places_confirmees
+FROM inscription i
+JOIN session_cours s
+  ON s.id_session = i.id_session
+JOIN categorie c
+  ON c.id_categorie = s.id_categorie
+WHERE i.statut = 'CONFIRMEE'
+  AND i.montant >= 0
+  AND i.date_operation <= s.debut
+GROUP BY c.libelle
+ORDER BY c.libelle;
+
+-- Resultats attendus :
+-- C9 | FLE      | 55104
+-- C9 | allemand | 52705
+-- C9 | anglais  | 54870
+-- C9 | chinois  | 54681
+-- C9 | espagnol | 54579
+-- C9 | italien  | 54530
+-- Total       : 326469
 
 
