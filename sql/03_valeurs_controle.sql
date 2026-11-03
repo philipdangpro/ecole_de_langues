@@ -29,6 +29,15 @@ FROM ext_etudiants;
 
 
 -- ---------------------------------------------------------------------
+-- C2 : nombre d'opérations non valides, et leur répartition par motif
+-- ---------------------------------------------------------------------
+select count(*) from inscription_rejet; -- 397
+select motif, count(motif) as nb_motif from inscription_rejet group by motif; -- neg 80, apres_deb 97, no sess 220
+
+
+
+
+-- ---------------------------------------------------------------------
 -- C4 : le jour où le plus d'opérations valides ont été passées, et leur nombre
 --    Toutes les opérations valides comptent (confirmées et annulées).
 --    TRUNC enlève l'heure de date_operation pour regrouper par jour.
@@ -42,6 +51,15 @@ FETCH FIRST 1 ROWS ONLY;
 --   Pas d'égalité : le jour suivant au classement en a 552. Le pic vient du CSV
 --   (16 082 lignes ce jour-là, dont 14 non valides), heures réparties sur toute la journée.
 
+-- ---------------------------------------------------------------------
+-- C5	chiffre d'affaires de chaque site (somme des montants des opérations valides confirmées)
+-- ---------------------------------------------------------------------
+select sum(montant), id_site from inscription i
+--left join site s on s.id = i.id_site
+where statut = 'CONFIRMEE' group by i.id_site;
+-- 27333192	2
+-- 39082945	4
+-- 56080982	3
 
 -- ---------------------------------------------------------------------
 -- C7 : nombre de sessions en sur-réservation
@@ -60,4 +78,13 @@ FROM (
     HAVING SUM(i.nb_places) > s.capacite
 );
 -- Résultat : 15 sessions (même chiffre avec la vue V_SESSION_OCCUPATION du L1)
+
+-------------------------------------------------------------------------
+-- C8 nombre d'opérations groupées (même id_groupe) dont les opérations valides engagent au moins deux sites
+-------------------------------------------------------------------------
+select count(*) from (
+select id_groupe 
+from inscription where id_groupe is not null and statut = 'CONFIRMEE'
+group by id_groupe having count(distinct(id_site)) >= 2);
+
 
