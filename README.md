@@ -30,14 +30,14 @@ docker cp data/. oracle-bdd:/opt/oracle/donnees_langues/
 # 2. créer l'utilisateur langues, ses droits, le dossier Oracle, les 3 comptes de test
 #    du L5 (agent_bordeaux, agent_tours, direction) et les 3 bases de site du L6
 #    (site_bordeaux, site_tours, site_angers), avec le compte administrateur du kit
-docker cp sql/installation_system.sql oracle-bdd:/tmp/installation_system.sql
+docker cp prerequis/installation_system.sql oracle-bdd:/tmp/installation_system.sql
 docker exec oracle-bdd sqlplus -s system/oracle@//localhost:1521/FREEPDB1 "@/tmp/installation_system.sql"
 
 # 3. créer l'utilisateur langues, ses droits, le dossier Oracle, les 3 comptes de test
 se connecter en tant que system/oracle
-exécuter sql/installation_system.sql
+exécuter prerequis/installation_system.sql
 se connecter en tant que langues/langues
-exécuter sql/run_all.sql
+exécuter prerequis/run_all.sql
 ```
 
 ## Ordre d'exécution des scripts Oracle

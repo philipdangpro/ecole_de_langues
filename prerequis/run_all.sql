@@ -11,16 +11,16 @@ SET DEFINE OFF
 SPOOL run_all.log
 
 @@00_nettoyage.sql
-@@01_creation_tables.sql
-@@02_chargement.sql
-@@03_valeurs_controle.sql -- a enlever
-@@04_requetes_metier.sql -- a enlever
-@@05_normalisation.sql
-@@06_triggers.sql
-@@07_package_parcours.sql
-@@08_performance.sql
-@@09_securite.sql
-@@10_distribution.sql
-@@11_bonus_objet.sql
+@@../L1_modele/01_creation_tables.sql
+@@../L2_chargement_requetes/02_chargement.sql
+-- @@03_valeurs_controle.sql -- a enlever
+-- @@04_requetes_metier.sql -- a enlever
+-- @@05_normalisation.sql
+-- @@06_triggers.sql
+-- @@07_package_parcours.sql
+-- @@08_performance.sql
+-- @@09_securite.sql
+-- @@10_distribution.sql
+-- @@11_bonus_objet.sql
 
 SPOOL OFF
