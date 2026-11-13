@@ -1,0 +1,3658 @@
+SQL> 
+SQL> @@00_nettoyage.sql
+SQL> -- =====================================================================
+SQL> -- 00_nettoyage.sql
+SQL> -- Livrable : tous
+SQL> -- Rôle     : supprime tous les objets du schéma courant (langues) pour pouvoir
+SQL> --            relancer run_all.sql de zéro, sur une base neuve comme sur une base déjà remplie.
+SQL> -- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+SQL> --
+SQL> -- On parcourt le dictionnaire (USER_OBJECTS) plutôt que d'écrire une liste de DROP :
+SQL> -- un objet ajouté plus tard par un autre livrable sera supprimé lui aussi, sans
+SQL> -- erreur ORA-00942 si la table n'existe pas encore.
+SQL> -- =====================================================================
+SQL> 
+SQL> BEGIN
+  2      FOR o IN (
+  3          SELECT object_name, object_type
+  4          FROM   user_objects
+  5          WHERE  object_type IN ('MATERIALIZED VIEW', 'VIEW', 'TABLE', 'SEQUENCE',
+  6                                 'PACKAGE', 'PROCEDURE', 'FUNCTION', 'TYPE', 'SYNONYM',
+  7                                 'DATABASE LINK')
+  8          AND    object_name NOT LIKE 'BIN$%'          -- corbeille
+  9          AND    object_name NOT LIKE 'ISEQ$$%'        -- séquences des colonnes IDENTITY
+ 10          AND    object_name NOT LIKE 'MLOG$%'         -- journaux de vues matérialisées
+ 11          ORDER BY DECODE(object_type, 'MATERIALIZED VIEW', 1, 'VIEW', 2, 'TABLE', 3,
+ 12                          'TYPE', 9, 5)
+ 13      ) LOOP
+ 14          BEGIN
+ 15              EXECUTE IMMEDIATE 'DROP ' || o.object_type || ' "' || o.object_name || '"'
+ 16                  || CASE o.object_type
+ 17                         WHEN 'TABLE' THEN ' CASCADE CONSTRAINTS PURGE'
+ 18                         WHEN 'TYPE'  THEN ' FORCE'
+ 19                     END;
+ 20          EXCEPTION
+ 21              -- objet déjà supprimé par un DROP précédent (ex. table d'une vue matérialisée)
+ 22              WHEN OTHERS THEN
+ 23                  IF SQLCODE NOT IN (-942, -4043, -2289, -12003) THEN RAISE; END IF;
+ 24          END;
+ 25      END LOOP;
+ 26  END;
+ 27  /
+BEGIN
+*
+ERROR à la ligne 1:
+ORA-65040: L'opération n'est pas autorisée à partir d'une base de données pluggable.
+ORA-06512: à ligne 23
+ORA-06512: à ligne 23
+ORA-06512: à ligne 15
+
+https://docs.oracle.com/error-help/db/ora-65040/
+
+
+More Details :
+https://docs.oracle.com/error-help/db/ora-65040/
+https://docs.oracle.com/error-help/db/ora-06512/
+SQL> 
+SQL> PURGE RECYCLEBIN;
+
+RECYCLEBIN purgé(e).
+
+
+
+SQL> @@01_creation_tables.sql
+SQL> -- =====================================================================
+SQL> -- 01_creation_tables.sql
+SQL> -- Livrable : L1 · Modèle
+SQL> -- Rôle     : crée les 7 tables du modèle et 2 vues, avec toutes les contraintes nommées.
+SQL> --            Modèle et règles de gestion (RG1 à RG16) : docs/L1_modele/L1_modele.md
+SQL> --            Description colonne par colonne : docs/L1_modele/L1_schema_relationnel.md
+SQL> -- Lancé par : sql/run_all.sql (après 00_nettoyage.sql)
+SQL> --
+SQL> -- Convention de nommage des contraintes :
+SQL> --   pk_<table>             clé primaire
+SQL> --   fk_<table>_<cible>     clé étrangère
+SQL> --   uq_<table>_<colonnes>  unicité
+SQL> --   ck_<table>_<règle>     vérification
+SQL> --   nn_<table>_<colonne>   NOT NULL (nommée pour que le message d'erreur soit lisible)
+SQL> --
+SQL> -- Choix de types communs :
+SQL> --   - VARCHAR2(n CHAR) : la longueur compte des caractères, pas des octets (« Siège »,
+SQL> --     « Léo », « Zoé » prennent plus d'octets que de lettres en UTF-8).
+SQL> --   - DATE pour toutes les dates : une DATE Oracle garde l'heure à la seconde près, ce qui
+SQL> --     suffit (les CSV n'ont pas de fractions de seconde) et simplifie les calculs.
+SQL> --   - Les index sur les clés étrangères ne sont pas créés ici : ils sont mesurés en L5.
+SQL> -- =====================================================================
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- CAMPUS et son héritage SIEGE / SITE (RG1, RG2)
+SQL> -- Une table par type. Le type est recopié dans chaque sous-table et la clé étrangère
+SQL> -- composite (id_campus, type_campus) empêche de mettre un campus de type SIEGE dans SITE.
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE TABLE campus (
+  2      id_campus    NUMBER(4)          CONSTRAINT nn_campus_id    NOT NULL,
+  3      nom          VARCHAR2(60 CHAR)  CONSTRAINT nn_campus_nom   NOT NULL,
+  4      ville        VARCHAR2(60 CHAR)  CONSTRAINT nn_campus_ville NOT NULL,
+  5      type_campus  VARCHAR2(5 CHAR)   CONSTRAINT nn_campus_type  NOT NULL,
+  6      CONSTRAINT pk_campus         PRIMARY KEY (id_campus),
+  7      CONSTRAINT ck_campus_type    CHECK (type_campus IN ('SIEGE', 'SITE')),
+  8      -- cible des clés étrangères composites des sous-tables
+  9      CONSTRAINT uq_campus_id_type UNIQUE (id_campus, type_campus)
+ 10  );
+
+Table CAMPUS créé(e).
+
+SQL> 
+SQL> CREATE TABLE siege (
+  2      id_campus    NUMBER(4)                        CONSTRAINT nn_siege_id   NOT NULL,
+  3      type_campus  VARCHAR2(5 CHAR) DEFAULT 'SIEGE' CONSTRAINT nn_siege_type NOT NULL,
+  4      CONSTRAINT pk_siege        PRIMARY KEY (id_campus),
+  5      CONSTRAINT ck_siege_type   CHECK (type_campus = 'SIEGE'),
+  6      -- RG2 : type_campus vaut toujours 'SIEGE', donc l'unicité interdit un deuxième siège
+  7      CONSTRAINT uq_siege_unique UNIQUE (type_campus),
+  8      CONSTRAINT fk_siege_campus FOREIGN KEY (id_campus, type_campus)
+  9                                 REFERENCES campus (id_campus, type_campus)
+ 10  );
+
+Table SIEGE créé(e).
+
+SQL> 
+SQL> CREATE TABLE site (
+  2      id_campus    NUMBER(4)                       CONSTRAINT nn_site_id    NOT NULL,
+  3      type_campus  VARCHAR2(5 CHAR) DEFAULT 'SITE' CONSTRAINT nn_site_type  NOT NULL,
+  4      id_siege     NUMBER(4)                       CONSTRAINT nn_site_siege NOT NULL,
+  5      CONSTRAINT pk_site        PRIMARY KEY (id_campus),
+  6      CONSTRAINT ck_site_type   CHECK (type_campus = 'SITE'),
+  7      CONSTRAINT fk_site_campus FOREIGN KEY (id_campus, type_campus)
+  8                                REFERENCES campus (id_campus, type_campus),
+  9      -- RG2 : chaque site dépend du siège
+ 10      CONSTRAINT fk_site_siege  FOREIGN KEY (id_siege) REFERENCES siege (id_campus)
+ 11  );
+
+Table SITE créé(e).
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- ETUDIANT (l'usager) et le parrainage réflexif (RG3 à RG7)
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE TABLE etudiant (
+  2      id_etudiant       NUMBER(8)           CONSTRAINT nn_etudiant_id     NOT NULL,
+  3      nom               VARCHAR2(80 CHAR)   CONSTRAINT nn_etudiant_nom    NOT NULL,
+  4      prenom            VARCHAR2(80 CHAR)   CONSTRAINT nn_etudiant_prenom NOT NULL,
+  5      email             VARCHAR2(254 CHAR),                   -- RG5 : facultatif
+  6      telephone         VARCHAR2(10 CHAR),                    -- texte : garde le 0 initial
+  7      ville             VARCHAR2(60 CHAR),
+  8      id_campus         NUMBER(4)           CONSTRAINT nn_etudiant_campus NOT NULL,
+  9      date_inscription  DATE                CONSTRAINT nn_etudiant_date   NOT NULL,  -- création du compte
+ 10      id_parrain        NUMBER(8),                            -- RG7 : au plus un parrain
+ 11      CONSTRAINT pk_etudiant          PRIMARY KEY (id_etudiant),
+ 12      -- RG4 : une personne = un e-mail normalisé. Oracle n'indexe pas les NULL, donc
+ 13      -- plusieurs étudiants sans e-mail restent possibles (RG5).
+ 14      CONSTRAINT uq_etudiant_email    UNIQUE (email),
+ 15      CONSTRAINT ck_etudiant_email_norm CHECK (
+ 16          email IS NULL
+ 17          OR (email = LOWER(REPLACE(email, ' ', '')) AND INSTR(email, '@') > 1)),
+ 18      -- RG6
+ 19      CONSTRAINT ck_etudiant_telephone CHECK (
+ 20          telephone IS NULL OR REGEXP_LIKE(telephone, '^0[0-9]{9}$')),
+ 21      -- RG3 : la clé pointe vers SITE, pas vers CAMPUS : le siège ne peut pas avoir d'étudiants
+ 22      CONSTRAINT fk_etudiant_site     FOREIGN KEY (id_campus) REFERENCES site (id_campus),
+ 23      -- RG7 : association réflexive
+ 24      CONSTRAINT fk_etudiant_parrain  FOREIGN KEY (id_parrain) REFERENCES etudiant (id_etudiant),
+ 25      CONSTRAINT ck_etudiant_pas_son_parrain CHECK (id_parrain IS NULL OR id_parrain <> id_etudiant)
+ 26  );
+
+Table ETUDIANT créé(e).
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- CATEGORIE (la langue enseignée) et SESSION_COURS (la ressource datée) (RG8)
+SQL> -- SESSION est un mot réservé d'Oracle, d'où le nom SESSION_COURS.
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE TABLE categorie (
+  2      id_categorie  NUMBER(4) GENERATED BY DEFAULT AS IDENTITY CONSTRAINT nn_categorie_id NOT NULL,
+  3      libelle       VARCHAR2(40 CHAR)  CONSTRAINT nn_categorie_libelle NOT NULL,
+  4      CONSTRAINT pk_categorie          PRIMARY KEY (id_categorie),
+  5      CONSTRAINT uq_categorie_libelle  UNIQUE (libelle),
+  6      CONSTRAINT ck_categorie_libelle_net CHECK (libelle = TRIM(libelle))
+  7  );
+
+Table CATEGORIE créé(e).
+
+SQL> 
+SQL> CREATE TABLE session_cours (
+  2      id_session     NUMBER(8)          CONSTRAINT nn_session_id        NOT NULL,
+  3      libelle        VARCHAR2(80 CHAR)  CONSTRAINT nn_session_libelle   NOT NULL,
+  4      id_categorie   NUMBER(4)          CONSTRAINT nn_session_categorie NOT NULL,
+  5      id_campus      NUMBER(4)          CONSTRAINT nn_session_campus    NOT NULL,
+  6      debut          DATE               CONSTRAINT nn_session_debut     NOT NULL,
+  7      duree_minutes  NUMBER(3)          CONSTRAINT nn_session_duree     NOT NULL,
+  8      capacite       NUMBER(3)          CONSTRAINT nn_session_capacite  NOT NULL,
+  9      prix_unitaire  NUMBER(7,2)        CONSTRAINT nn_session_prix      NOT NULL,
+ 10      CONSTRAINT pk_session            PRIMARY KEY (id_session),
+ 11      CONSTRAINT fk_session_categorie  FOREIGN KEY (id_categorie) REFERENCES categorie (id_categorie),
+ 12      -- RG3 : une session se tient dans un site, jamais au siège
+ 13      CONSTRAINT fk_session_site       FOREIGN KEY (id_campus) REFERENCES site (id_campus),
+ 14      CONSTRAINT ck_session_duree      CHECK (duree_minutes IN (45, 60, 90, 120)),
+ 15      CONSTRAINT ck_session_capacite   CHECK (capacite > 0),
+ 16      CONSTRAINT ck_session_prix       CHECK (prix_unitaire >= 0)
+ 17  );
+
+Table SESSION_COURS créé(e).
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- INSCRIPTION : association porteuse entre ETUDIANT et SESSION_COURS (RG9, RG11, RG16)
+SQL> -- Identifiant propre (id_inscription) : un étudiant peut avoir plusieurs inscriptions
+SQL> -- à la même session (annulation puis réinscription) et l'audit (L4) vise une ligne précise.
+SQL> -- Les règles qui portent sur plusieurs lignes ou plusieurs tables (RG7 date du parrain,
+SQL> -- RG12 montant, RG13 doublon confirmé, RG14 date du compte, RG15 capacité, RG16 tout ou
+SQL> -- rien) ne s'écrivent pas en CHECK : elles sont traitées par les triggers et le package (L4).
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE TABLE inscription (
+  2      id_inscription  NUMBER(10)        CONSTRAINT nn_inscription_id       NOT NULL,
+  3      id_etudiant     NUMBER(8)         CONSTRAINT nn_inscription_etudiant NOT NULL,
+  4      id_session      NUMBER(8)         CONSTRAINT nn_inscription_session  NOT NULL,
+  5      id_groupe       VARCHAR2(10 CHAR),                      -- opération groupée, sinon NULL
+  6      date_operation  DATE              CONSTRAINT nn_inscription_date     NOT NULL,
+  7      nb_places       NUMBER(3)         CONSTRAINT nn_inscription_places   NOT NULL,
+  8      montant         NUMBER(9,2)       CONSTRAINT nn_inscription_montant  NOT NULL,
+  9      statut          VARCHAR2(10 CHAR) CONSTRAINT nn_inscription_statut   NOT NULL,
+ 10      CONSTRAINT pk_inscription          PRIMARY KEY (id_inscription),
+ 11      CONSTRAINT fk_inscription_etudiant FOREIGN KEY (id_etudiant) REFERENCES etudiant (id_etudiant),
+ 12      -- RG11 : la session doit exister
+ 13      CONSTRAINT fk_inscription_session  FOREIGN KEY (id_session) REFERENCES session_cours (id_session),
+ 14      -- RG9
+ 15      CONSTRAINT ck_inscription_places   CHECK (nb_places >= 1),
+ 16      CONSTRAINT ck_inscription_statut   CHECK (statut IN ('CONFIRMEE', 'ANNULEE')),
+ 17      -- RG9 et RG11 : un montant négatif est refusé
+ 18      CONSTRAINT ck_inscription_montant  CHECK (montant >= 0),
+ 19      -- RG16 : format G + 5 chiffres (ex. G00042)
+ 20      CONSTRAINT ck_inscription_groupe   CHECK (id_groupe IS NULL OR REGEXP_LIKE(id_groupe, '^G[0-9]{5}$'))
+ 21  );
+
+Table INSCRIPTION créé(e).
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- Vues de règles de gestion
+SQL> -- ---------------------------------------------------------------------
+SQL> 
+SQL> -- RG10 : le site d'une opération est celui de sa session (on ne le stocke pas en double
+SQL> -- dans INSCRIPTION, il se déduit par jointure).
+SQL> CREATE OR REPLACE VIEW v_inscription_site AS
+  2  SELECT i.id_inscription, i.id_etudiant, i.id_session, i.id_groupe, i.date_operation,
+  3         i.nb_places, i.montant, i.statut,
+  4         s.id_campus AS id_site
+  5  FROM   inscription i
+  6  JOIN   session_cours s ON s.id_session = i.id_session;
+
+View V_INSCRIPTION_SITE créé(e).
+
+SQL> 
+SQL> -- RG15 : places confirmées par session, comparées à la capacité
+SQL> CREATE OR REPLACE VIEW v_session_occupation AS
+  2  SELECT s.id_session, s.libelle, s.id_campus AS id_site, s.capacite,
+  3         NVL(SUM(CASE WHEN i.statut = 'CONFIRMEE' THEN i.nb_places END), 0) AS places_confirmees,
+  4         CASE WHEN NVL(SUM(CASE WHEN i.statut = 'CONFIRMEE' THEN i.nb_places END), 0) > s.capacite
+  5              THEN 'O' ELSE 'N' END AS sur_reservee
+  6  FROM   session_cours s
+  7  LEFT JOIN inscription i ON i.id_session = s.id_session
+  8  GROUP BY s.id_session, s.libelle, s.id_campus, s.capacite;
+
+View V_SESSION_OCCUPATION créé(e).
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- Commentaires stockés dans le dictionnaire (visibles dans SQL Developer, onglet Détails)
+SQL> -- ---------------------------------------------------------------------
+SQL> COMMENT ON TABLE campus        IS 'Siège ou site de l''école (RG1). Le type est détaillé dans SIEGE ou SITE.';
+
+Comment créé(e).
+
+SQL> COMMENT ON TABLE siege         IS 'Sous-type de CAMPUS : un seul siège (RG2).';
+
+Comment créé(e).
+
+SQL> COMMENT ON TABLE site          IS 'Sous-type de CAMPUS : Bordeaux, Tours, Angers. Porte les étudiants et les sessions (RG3).';
+
+Comment créé(e).
+
+SQL> COMMENT ON TABLE etudiant      IS 'Usager. Une personne = un e-mail normalisé (RG4, RG5).';
+
+Comment créé(e).
+
+SQL> COMMENT ON TABLE categorie     IS 'Langue enseignée (FLE, anglais, espagnol, allemand, italien, chinois).';
+
+Comment créé(e).
+
+SQL> COMMENT ON TABLE session_cours IS 'Ressource datée : une session de cours dans un site (RG8).';
+
+Comment créé(e).
+
+SQL> COMMENT ON TABLE inscription   IS 'Opération : un étudiant réserve des places à une session (association porteuse, RG9).';
+
+Comment créé(e).
+
+SQL> 
+SQL> COMMENT ON COLUMN etudiant.date_inscription  IS 'Date de création du compte (RG14), à ne pas confondre avec INSCRIPTION.date_operation.';
+
+Comment créé(e).
+
+SQL> COMMENT ON COLUMN etudiant.id_parrain        IS 'Parrain (association réflexive, RG7). Absent des CSV : colonne ajoutée, vide au départ.';
+
+Comment créé(e).
+
+SQL> COMMENT ON COLUMN inscription.date_operation IS 'Date de l''inscription (colonne date_inscription de inscriptions.csv).';
+
+Comment créé(e).
+
+SQL> COMMENT ON COLUMN inscription.montant        IS 'nb_places x prix_unitaire, même pour une annulation (RG12).';
+
+Comment créé(e).
+
+SQL> COMMENT ON COLUMN inscription.id_groupe      IS 'Opération groupée (parcours) passée en une fois, tout ou rien (RG16).';
+
+Comment créé(e).
+
+SQL> @@02_chargement.sql
+SQL> -- =====================================================================
+SQL> -- 02_chargement.sql
+SQL> -- Livrable : L2 · Chargement
+SQL> -- Attendu  : chargement des 4 CSV de data/ avec traitement des défauts (correction, rejet tracé, signalement)
+SQL> -- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+SQL> --
+SQL> -- Prérequis : sql/installation_system.sql a été lancé une fois (DIRECTORY dir_donnees_langues
+SQL> -- qui pointe vers les CSV copiés dans le conteneur, voir README).
+SQL> --
+SQL> -- Méthode : chaque CSV est lu par une TABLE EXTERNE (le fichier reste sur le disque, Oracle le
+SQL> -- lit comme une table), puis copié dans les tables du L1 par INSERT ... SELECT.
+SQL> --
+SQL> -- Défauts traités ici (seulement ceux qui empêcheraient le chargement) :
+SQL> --   1. 73 étudiants en double (même e-mail une fois normalisé) : on garde l'original (le plus
+SQL> --      petit id), la copie est tracée dans ETUDIANT_DOUBLON, ses inscriptions sont rattachées
+SQL> --      à l'original.
+SQL> --   2. 397 inscriptions non valides au sens du sujet (session inexistante, montant négatif,
+SQL> --      date après le début de la session) : non chargées, tracées dans INSCRIPTION_REJET
+SQL> --      avec leur motif.
+SQL> -- Les autres défauts (doubles confirmations, inscriptions avant la création du compte,
+SQL> -- sessions sur-réservées) ne rendent pas une opération non valide : ces lignes sont chargées
+SQL> -- telles quelles et seront empêchées pour les nouvelles opérations en L4.
+SQL> -- =====================================================================
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 1. Tables externes : une par CSV, toutes les colonnes lues en texte
+SQL> --    (la conversion en nombre ou en date se fait à l'insertion, avec un format explicite).
+SQL> --    DETECTED NEWLINE : accepte les fins de ligne Windows (CRLF) comme Unix (LF).
+SQL> --    NOLOGFILE / NOBADFILE : Oracle n'a pas le droit d'écrire dans le dossier des CSV.
+SQL> --    NOTRIM (étudiants seulement) : garde les espaces autour des e-mails, pour tracer le défaut
+SQL> --    tel qu'il était dans le CSV.
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE TABLE ext_campus (
+  2      id_campus VARCHAR2(20), nom VARCHAR2(100), ville VARCHAR2(100), role VARCHAR2(20)
+  3  )
+  4  ORGANIZATION EXTERNAL (
+  5      TYPE ORACLE_LOADER DEFAULT DIRECTORY dir_donnees_langues
+  6      ACCESS PARAMETERS (
+  7          RECORDS DELIMITED BY DETECTED NEWLINE CHARACTERSET AL32UTF8 SKIP 1
+  8          NOLOGFILE NOBADFILE NODISCARDFILE
+  9          FIELDS TERMINATED BY ',' MISSING FIELD VALUES ARE NULL
+ 10      )
+ 11      LOCATION ('campus.csv')
+ 12  ) REJECT LIMIT 0;
+
+Table EXT_CAMPUS créé(e).
+
+SQL> 
+SQL> CREATE TABLE ext_etudiants (
+  2      id_etudiant VARCHAR2(20), nom VARCHAR2(100), prenom VARCHAR2(100), email VARCHAR2(300),
+  3      telephone VARCHAR2(30), ville VARCHAR2(100), id_campus VARCHAR2(20), date_inscription VARCHAR2(30)
+  4  )
+  5  ORGANIZATION EXTERNAL (
+  6      TYPE ORACLE_LOADER DEFAULT DIRECTORY dir_donnees_langues
+  7      ACCESS PARAMETERS (
+  8          RECORDS DELIMITED BY DETECTED NEWLINE CHARACTERSET AL32UTF8 SKIP 1
+  9          NOLOGFILE NOBADFILE NODISCARDFILE
+ 10          FIELDS TERMINATED BY ',' NOTRIM MISSING FIELD VALUES ARE NULL
+ 11      )
+ 12      LOCATION ('etudiants.csv')
+ 13  ) REJECT LIMIT 0;
+
+Table EXT_ETUDIANTS créé(e).
+
+SQL> 
+SQL> CREATE TABLE ext_sessions (
+  2      id_session VARCHAR2(20), libelle VARCHAR2(100), categorie VARCHAR2(50), id_campus VARCHAR2(20),
+  3      debut VARCHAR2(30), duree_minutes VARCHAR2(20), capacite VARCHAR2(20), prix_unitaire VARCHAR2(20)
+  4  )
+  5  ORGANIZATION EXTERNAL (
+  6      TYPE ORACLE_LOADER DEFAULT DIRECTORY dir_donnees_langues
+  7      ACCESS PARAMETERS (
+  8          RECORDS DELIMITED BY DETECTED NEWLINE CHARACTERSET AL32UTF8 SKIP 1
+  9          NOLOGFILE NOBADFILE NODISCARDFILE
+ 10          FIELDS TERMINATED BY ',' MISSING FIELD VALUES ARE NULL
+ 11      )
+ 12      LOCATION ('sessions.csv')
+ 13  ) REJECT LIMIT 0;
+
+Table EXT_SESSIONS créé(e).
+
+SQL> 
+SQL> CREATE TABLE ext_inscriptions (
+  2      id_inscription VARCHAR2(20), id_etudiant VARCHAR2(20), id_session VARCHAR2(20),
+  3      date_inscription VARCHAR2(30), nb_places VARCHAR2(20), montant VARCHAR2(20),
+  4      statut VARCHAR2(20), id_groupe VARCHAR2(20)
+  5  )
+  6  ORGANIZATION EXTERNAL (
+  7      TYPE ORACLE_LOADER DEFAULT DIRECTORY dir_donnees_langues
+  8      ACCESS PARAMETERS (
+  9          RECORDS DELIMITED BY DETECTED NEWLINE CHARACTERSET AL32UTF8 SKIP 1
+ 10          NOLOGFILE NOBADFILE NODISCARDFILE
+ 11          FIELDS TERMINATED BY ',' MISSING FIELD VALUES ARE NULL
+ 12      )
+ 13      LOCATION ('inscriptions.csv')
+ 14  ) REJECT LIMIT 0;
+
+Table EXT_INSCRIPTIONS créé(e).
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 2. Tables de traçabilité des défauts
+SQL> -- ---------------------------------------------------------------------
+SQL> 
+SQL> -- Étudiants en double : la copie n'est pas chargée dans ETUDIANT
+SQL> CREATE TABLE etudiant_doublon (
+  2      id_copie      NUMBER(8)          CONSTRAINT nn_doublon_copie    NOT NULL,
+  3      id_original   NUMBER(8)          CONSTRAINT nn_doublon_original NOT NULL,
+  4      email_source  VARCHAR2(254 CHAR),                     -- e-mail tel qu'il était dans le CSV
+  5      CONSTRAINT pk_etudiant_doublon   PRIMARY KEY (id_copie),
+  6      CONSTRAINT fk_doublon_original   FOREIGN KEY (id_original) REFERENCES etudiant (id_etudiant),
+  7      CONSTRAINT ck_doublon_different  CHECK (id_copie <> id_original)
+  8  );
+
+Table ETUDIANT_DOUBLON créé(e).
+
+SQL> 
+SQL> -- Inscriptions non valides : gardées telles qu'elles étaient dans le CSV, avec le motif
+SQL> CREATE TABLE inscription_rejet (
+  2      id_inscription  NUMBER(10)         CONSTRAINT nn_rejet_id    NOT NULL,
+  3      id_etudiant     NUMBER(8),
+  4      id_session      NUMBER(8),
+  5      date_operation  DATE,
+  6      nb_places       NUMBER(3),
+  7      montant         NUMBER(9,2),
+  8      statut          VARCHAR2(10 CHAR),
+  9      id_groupe       VARCHAR2(10 CHAR),
+ 10      motif           VARCHAR2(30 CHAR)  CONSTRAINT nn_rejet_motif NOT NULL,
+ 11      CONSTRAINT pk_inscription_rejet PRIMARY KEY (id_inscription),
+ 12      CONSTRAINT ck_rejet_motif CHECK (motif IN ('SESSION_INEXISTANTE', 'MONTANT_NEGATIF',
+ 13                                                 'DATE_APRES_DEBUT'))
+ 14  );
+
+Table INSCRIPTION_REJET créé(e).
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 3. Campus, siège, sites
+SQL> --    Le CSV écrit le rôle « siège » / « site » ; on le traduit en SIEGE / SITE.
+SQL> --    (LIKE 'si_ge' évite d'écrire un accent dans le script.)
+SQL> -- ---------------------------------------------------------------------
+SQL> INSERT INTO campus (id_campus, nom, ville, type_campus)
+  2  SELECT TO_NUMBER(id_campus), TRIM(nom), TRIM(ville),
+  3         CASE WHEN LOWER(TRIM(role)) = 'site'      THEN 'SITE'
+  4              WHEN LOWER(TRIM(role)) LIKE 'si_ge'  THEN 'SIEGE'
+  5         END                                     -- autre valeur : NULL, refusée par nn_campus_type
+  6  FROM   ext_campus;
+
+4 lignes inséré.
+
+SQL> 
+SQL> INSERT INTO siege (id_campus)
+  2  SELECT id_campus FROM campus WHERE type_campus = 'SIEGE';
+
+1 ligne inséré.
+
+SQL> 
+SQL> INSERT INTO site (id_campus, id_siege)
+  2  SELECT c.id_campus, s.id_campus
+  3  FROM   campus c CROSS JOIN siege s
+  4  WHERE  c.type_campus = 'SITE';
+
+3 lignes inséré.
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 4. Étudiants
+SQL> --    E-mail normalisé : minuscules, sans espaces ; vide -> NULL.
+SQL> --    Pour chaque e-mail normalisé, l'original est le plus petit id ; les autres sont des copies.
+SQL> -- ---------------------------------------------------------------------
+SQL> INSERT INTO etudiant (id_etudiant, nom, prenom, email, telephone, ville, id_campus, date_inscription)
+  2  SELECT id_etudiant, nom, prenom, email_norm, telephone, ville, id_campus, date_inscription
+  3  FROM (
+  4      SELECT TO_NUMBER(id_etudiant)                         AS id_etudiant,
+  5             TRIM(nom)                                      AS nom,
+  6             TRIM(prenom)                                   AS prenom,
+  7             LOWER(REPLACE(email, ' ', ''))                 AS email_norm,
+  8             TRIM(telephone)                                AS telephone,
+  9             TRIM(ville)                                    AS ville,
+ 10             TO_NUMBER(id_campus)                           AS id_campus,
+ 11             TO_DATE(TRIM(date_inscription), 'YYYY-MM-DD')  AS date_inscription,
+ 12             -- rang dans le groupe des étudiants qui ont le même e-mail normalisé
+ 13             CASE WHEN LOWER(REPLACE(email, ' ', '')) IS NULL THEN 1
+ 14                  ELSE ROW_NUMBER() OVER (PARTITION BY LOWER(REPLACE(email, ' ', ''))
+ 15                                          ORDER BY TO_NUMBER(id_etudiant))
+ 16             END                                            AS rang
+ 17      FROM   ext_etudiants
+ 18  )
+ 19  WHERE rang = 1;
+
+21 471 lignes inséré.
+
+SQL> 
+SQL> INSERT INTO etudiant_doublon (id_copie, id_original, email_source)
+  2  SELECT TO_NUMBER(x.id_etudiant), e.id_etudiant, x.email
+  3  FROM   ext_etudiants x
+  4  JOIN   etudiant e ON e.email = LOWER(REPLACE(x.email, ' ', ''))
+  5  WHERE  TO_NUMBER(x.id_etudiant) <> e.id_etudiant;
+
+73 lignes inséré.
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 5. Catégories et sessions
+SQL> -- ---------------------------------------------------------------------
+SQL> INSERT INTO categorie (libelle)
+  2  SELECT DISTINCT TRIM(categorie) FROM ext_sessions ORDER BY 1;
+
+6 lignes inséré.
+
+SQL> 
+SQL> INSERT INTO session_cours (id_session, libelle, id_categorie, id_campus, debut,
+  2                             duree_minutes, capacite, prix_unitaire)
+  3  SELECT TO_NUMBER(s.id_session), TRIM(s.libelle), c.id_categorie, TO_NUMBER(s.id_campus),
+  4         TO_DATE(TRIM(s.debut), 'YYYY-MM-DD HH24:MI:SS'),
+  5         TO_NUMBER(s.duree_minutes), TO_NUMBER(s.capacite),
+  6         TO_NUMBER(s.prix_unitaire, '999999D99', 'NLS_NUMERIC_CHARACTERS=''.,''')
+  7  FROM   ext_sessions s
+  8  JOIN   categorie c ON c.libelle = TRIM(s.categorie);
+
+47 619 lignes inséré.
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 6. Inscriptions
+SQL> --    On prépare chaque ligne une seule fois (vue en ligne « src ») : conversion des types,
+SQL> --    rattachement des copies d'étudiants à l'original, calcul du motif de rejet.
+SQL> --    Le format numérique est imposé (point décimal) : SQL Developer en français utiliserait
+SQL> --    sinon la virgule et TO_NUMBER('309.00') échouerait.
+SQL> -- ---------------------------------------------------------------------
+SQL> INSERT ALL
+  2      WHEN motif IS NULL THEN
+  3          INTO inscription (id_inscription, id_etudiant, id_session, id_groupe, date_operation,
+  4                            nb_places, montant, statut)
+  5          VALUES (id_inscription, id_etudiant, id_session, id_groupe, date_operation,
+  6                  nb_places, montant, statut)
+  7      ELSE
+  8          INTO inscription_rejet (id_inscription, id_etudiant, id_session, date_operation,
+  9                                  nb_places, montant, statut, id_groupe, motif)
+ 10          VALUES (id_inscription, id_etudiant, id_session, date_operation,
+ 11                  nb_places, montant, statut, id_groupe, motif)
+ 12  SELECT i.id_inscription, NVL(d.id_original, i.id_etudiant) AS id_etudiant, i.id_session,
+ 13         i.id_groupe, i.date_operation, i.nb_places, i.montant, i.statut,
+ 14         CASE WHEN s.id_session IS NULL       THEN 'SESSION_INEXISTANTE'
+ 15              WHEN i.montant < 0              THEN 'MONTANT_NEGATIF'
+ 16              WHEN i.date_operation > s.debut THEN 'DATE_APRES_DEBUT'
+ 17         END AS motif
+ 18  FROM (
+ 19      SELECT TO_NUMBER(id_inscription)                               AS id_inscription,
+ 20             TO_NUMBER(id_etudiant)                                  AS id_etudiant,
+ 21             TO_NUMBER(id_session)                                   AS id_session,
+ 22             TRIM(id_groupe)                                         AS id_groupe,  -- vide -> NULL
+ 23             TO_DATE(TRIM(date_inscription), 'YYYY-MM-DD HH24:MI:SS') AS date_operation,
+ 24             TO_NUMBER(nb_places)                                    AS nb_places,
+ 25             TO_NUMBER(montant, '999999D99', 'NLS_NUMERIC_CHARACTERS=''.,''') AS montant,
+ 26             TRIM(statut)                                            AS statut
+ 27      FROM   ext_inscriptions
+ 28  ) i
+ 29  LEFT JOIN session_cours    s ON s.id_session = i.id_session
+ 30  LEFT JOIN etudiant_doublon d ON d.id_copie   = i.id_etudiant;
+
+354 855 lignes inséré.
+
+SQL> 
+SQL> COMMIT;
+Validation terminée.
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 7. Bilan du chargement (à recopier dans le rapport)
+SQL> -- ---------------------------------------------------------------------
+SQL> SELECT 'campus'            AS objet, COUNT(*) AS nb FROM campus
+  2  UNION ALL SELECT 'sites',              COUNT(*) FROM site
+  3  UNION ALL SELECT 'etudiants (csv)',    COUNT(*) FROM ext_etudiants
+  4  UNION ALL SELECT 'etudiants charges',  COUNT(*) FROM etudiant
+  5  UNION ALL SELECT 'etudiants doublons', COUNT(*) FROM etudiant_doublon
+  6  UNION ALL SELECT 'categories',         COUNT(*) FROM categorie
+  7  UNION ALL SELECT 'sessions',           COUNT(*) FROM session_cours
+  8  UNION ALL SELECT 'inscriptions (csv)', COUNT(*) FROM ext_inscriptions
+  9  UNION ALL SELECT 'inscriptions chargees', COUNT(*) FROM inscription
+ 10  UNION ALL SELECT 'inscriptions rejetees', COUNT(*) FROM inscription_rejet;
+
+OBJET                         NB
+--------------------- ----------
+campus                         4
+sites                          3
+etudiants (csv)            21544
+etudiants charges          21471
+etudiants doublons            73
+categories                     6
+sessions                   47619
+inscriptions (csv)        354855
+inscriptions chargees     354458
+inscriptions rejetees        397
+
+10 lignes sélectionnées. 
+
+SQL> 
+SQL> COLUMN motif FORMAT A20
+SQL> SELECT motif, COUNT(*) AS nb FROM inscription_rejet GROUP BY motif ORDER BY motif;
+
+MOTIF                        NB
+-------------------- ----------
+DATE_APRES_DEBUT             97
+MONTANT_NEGATIF              80
+SESSION_INEXISTANTE         220
+
+SQL> @@03_valeurs_controle.sql
+SQL> -- =====================================================================
+SQL> -- 03_valeurs_controle.sql
+SQL> -- Livrable : L2 · Valeurs de contrôle
+SQL> -- Responsable : à définir
+SQL> -- Attendu  : une requête par valeur C1 à C9, avec le résultat obtenu en commentaire
+SQL> -- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+SQL> --
+SQL> -- Rappel : INSCRIPTION ne contient que les opérations valides (les autres sont dans
+SQL> -- INSCRIPTION_REJET, voir 02_chargement.sql). Pas besoin de refiltrer pour C3 à C9.
+SQL> -- =====================================================================
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- C1 : nombre de personnes distinctes
+SQL> --    Les doublons (même e-mail une fois en minuscules et sans espaces) ont été fusionnés
+SQL> --    au chargement : une ligne d'ETUDIANT = une personne.
+SQL> -- ---------------------------------------------------------------------
+SQL> SELECT COUNT(*) AS c1
+  2  FROM etudiant;
+
+        C1
+----------
+     21471
+
+SQL> -- Résultat : 21 471
+SQL> 
+SQL> -- Vérification sur le CSV brut (table externe, avant fusion), avec la règle du sujet :
+SQL> --   e-mails distincts une fois normalisés + lignes sans e-mail (une personne chacune).
+SQL> --   COUNT(*) - COUNT(email) = nombre de lignes sans e-mail (COUNT(email) ignore les NULL).
+SQL> SELECT COUNT(*) AS lignes_csv,
+  2         COUNT(DISTINCT LOWER(REPLACE(email, ' ', ''))) + COUNT(*) - COUNT(email) AS c1
+  3  FROM ext_etudiants;
+
+LIGNES_CSV         C1
+---------- ----------
+     21544      21471
+
+SQL> -- Résultat : 21 544 lignes, 21 471 personnes (identique à C1 : la fusion est juste)
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- C4 : le jour où le plus d'opérations valides ont été passées, et leur nombre
+SQL> --    Toutes les opérations valides comptent (confirmées et annulées).
+SQL> --    TRUNC enlève l'heure de date_operation pour regrouper par jour.
+SQL> -- ---------------------------------------------------------------------
+SQL> SELECT TRUNC(date_operation) AS jour, COUNT(*) AS cpt
+  2  FROM inscription
+  3  GROUP BY TRUNC(date_operation)
+  4  ORDER BY cpt DESC
+  5  FETCH FIRST 1 ROWS ONLY;
+
+JOUR            CPT
+-------- ----------
+10/09/26      16068
+
+SQL> -- Résultat : 10/09/2026, 16 068 opérations
+SQL> --   Pas d'égalité : le jour suivant au classement en a 552. Le pic vient du CSV
+SQL> --   (16 082 lignes ce jour-là, dont 14 non valides), heures réparties sur toute la journée.
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- C7 : nombre de sessions en sur-réservation
+SQL> --    Pour chaque session : somme des places des inscriptions confirmées, comparée à sa
+SQL> --    capacité (HAVING filtre après le regroupement). On compte ensuite ces sessions.
+SQL> --    SUM(nb_places) et pas COUNT(*) : une inscription peut réserver plusieurs places
+SQL> --    (dans ce jeu de données elles valent toutes 1, d'où le même résultat).
+SQL> -- ---------------------------------------------------------------------
+SQL> SELECT COUNT(*) AS c7
+  2  FROM (
+  3      SELECT i.id_session
+  4      FROM inscription i
+  5      JOIN session_cours s ON i.id_session = s.id_session
+  6      WHERE i.statut = 'CONFIRMEE'
+  7      GROUP BY i.id_session, s.capacite
+  8      HAVING SUM(i.nb_places) > s.capacite
+  9  );
+
+        C7
+----------
+        15
+
+SQL> -- Résultat : 15 sessions (même chiffre avec la vue V_SESSION_OCCUPATION du L1)
+SQL> @@04_requetes_metier.sql
+SQL> -- =====================================================================
+SQL> -- 04_requetes_metier.sql
+SQL> -- Livrable : L2 · Requêtes
+SQL> -- Responsable : à définir
+SQL> -- Attendu  : 10 requêtes métier (énoncé + résultat) : jointure externe, HAVING, sous-requête corrélée, division, fenêtrage
+SQL> -- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+SQL> -- =====================================================================
+SQL> @@05_normalisation.sql
+SQL> -- =====================================================================
+SQL> -- 05_normalisation.sql
+SQL> -- Livrable : L3 · Normalisation
+SQL> -- Responsable : Younes (analyse de départ, en Python), Baptiste (reprise en SQL)
+SQL> -- Attendu  : table des opérations à plat + dépendances fonctionnelles + décomposition
+SQL> --            + dénormalisation assumée. Explications : docs/L3_normalisation/L3_normalisation.md
+SQL> -- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+SQL> --
+SQL> -- Plan :
+SQL> --   1. OPERATION_A_PLAT : une ligne par opération du CSV, avec son étudiant, sa session et
+SQL> --      les deux campus (celui de l'étudiant, celui de la session). Construite depuis les
+SQL> --      CSV bruts (tables externes du L2), donc AVANT tout nettoyage.
+SQL> --   2. Dépendances fonctionnelles (DF) vérifiées sur cette table, une requête par DF.
+SQL> --   3. Décomposition : on projette la table à plat en 4 relations, on les rejoint, et on
+SQL> --      vérifie qu'on retrouve exactement la table à plat (décomposition sans perte).
+SQL> --   4. Dénormalisation assumée : le site de la session est recopié dans INSCRIPTION
+SQL> --      (colonne id_site), tenu cohérent par une clé étrangère composite et un trigger.
+SQL> --
+SQL> -- Lit les tables externes EXT_* et les tables du L1/L2 : à lancer après 02_chargement.sql.
+SQL> -- =====================================================================
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 1. Table des opérations à plat
+SQL> --    Mêmes conversions qu'en 02_chargement.sql (format explicite, point décimal imposé).
+SQL> --    LEFT JOIN : les 220 opérations dont la session n'existe pas sont gardées, avec des
+SQL> --    colonnes de session vides. Rien n'est corrigé : l'e-mail est gardé tel qu'il est
+SQL> --    dans le CSV (majuscules, espaces), les copies d'étudiants gardent leur propre id.
+SQL> --    Le téléphone reste du texte : il garde son 0 initial.
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE TABLE operation_a_plat AS
+  2  WITH ins AS (
+  3      SELECT TO_NUMBER(id_inscription)                                 AS id_inscription,
+  4             TO_NUMBER(id_etudiant)                                    AS id_etudiant,
+  5             TO_NUMBER(id_session)                                     AS id_session,
+  6             TRIM(id_groupe)                                           AS id_groupe,
+  7             TO_DATE(TRIM(date_inscription), 'YYYY-MM-DD HH24:MI:SS')  AS date_operation,
+  8             TO_NUMBER(nb_places)                                      AS nb_places,
+  9             TO_NUMBER(montant, '999999D99', 'NLS_NUMERIC_CHARACTERS=''.,''') AS montant,
+ 10             TRIM(statut)                                              AS statut
+ 11      FROM   ext_inscriptions
+ 12  ), etu AS (
+ 13      SELECT TO_NUMBER(id_etudiant)                         AS id_etudiant,
+ 14             TRIM(nom)                                      AS nom,
+ 15             TRIM(prenom)                                   AS prenom,
+ 16             email,                                         -- brut, tel que dans le CSV
+ 17             TRIM(telephone)                                AS telephone,
+ 18             TRIM(ville)                                    AS ville,
+ 19             TO_NUMBER(id_campus)                           AS id_campus,
+ 20             TO_DATE(TRIM(date_inscription), 'YYYY-MM-DD')  AS date_creation_compte
+ 21      FROM   ext_etudiants
+ 22  ), ses AS (
+ 23      SELECT TO_NUMBER(id_session)                               AS id_session,
+ 24             TRIM(libelle)                                       AS libelle,
+ 25             TRIM(categorie)                                     AS categorie,
+ 26             TO_NUMBER(id_campus)                                AS id_campus,
+ 27             TO_DATE(TRIM(debut), 'YYYY-MM-DD HH24:MI:SS')       AS debut,
+ 28             TO_NUMBER(duree_minutes)                            AS duree_minutes,
+ 29             TO_NUMBER(capacite)                                 AS capacite,
+ 30             TO_NUMBER(prix_unitaire, '999999D99', 'NLS_NUMERIC_CHARACTERS=''.,''') AS prix_unitaire
+ 31      FROM   ext_sessions
+ 32  ), cam AS (
+ 33      SELECT TO_NUMBER(id_campus) AS id_campus, TRIM(nom) AS nom, TRIM(ville) AS ville,
+ 34             TRIM(role) AS role
+ 35      FROM   ext_campus
+ 36  )
+ 37  SELECT -- l'opération
+ 38         i.id_inscription, i.id_etudiant, i.id_session, i.id_groupe, i.date_operation,
+ 39         i.nb_places, i.montant, i.statut,
+ 40         -- l'usager
+ 41         e.nom, e.prenom, e.email, e.telephone, e.ville,
+ 42         e.id_campus  AS id_campus_etudiant, e.date_creation_compte,
+ 43         ce.nom       AS nom_campus_etudiant, ce.ville AS ville_campus_etudiant,
+ 44         ce.role      AS role_campus_etudiant,
+ 45         -- la ressource
+ 46         s.libelle    AS libelle_session, s.categorie, s.id_campus AS id_campus_session,
+ 47         s.debut, s.duree_minutes, s.capacite, s.prix_unitaire,
+ 48         cs.nom       AS nom_campus_session, cs.ville AS ville_campus_session,
+ 49         cs.role      AS role_campus_session
+ 50  FROM   ins i
+ 51  LEFT JOIN etu e  ON e.id_etudiant  = i.id_etudiant
+ 52  LEFT JOIN cam ce ON ce.id_campus   = e.id_campus
+ 53  LEFT JOIN ses s  ON s.id_session   = i.id_session
+ 54  LEFT JOIN cam cs ON cs.id_campus   = s.id_campus;
+
+Table OPERATION_A_PLAT créé(e).
+
+SQL> 
+SQL> -- La clé de la table à plat est id_inscription (la contrainte le prouve : elle serait
+SQL> -- refusée s'il y avait un doublon).
+SQL> ALTER TABLE operation_a_plat ADD CONSTRAINT pk_operation_a_plat PRIMARY KEY (id_inscription);
+
+Table OPERATION_A_PLAT modifié(e).
+
+SQL> 
+SQL> COMMENT ON TABLE operation_a_plat IS 'L3 : opérations du CSV à plat (inscription + étudiant + session + campus), avant nettoyage. Sert à vérifier les DF.';
+
+Comment créé(e).
+
+SQL> 
+SQL> SELECT COUNT(*) AS lignes_a_plat FROM operation_a_plat;
+
+LIGNES_A_PLAT
+-------------
+       354855
+
+SQL> -- Résultat : 354 855 lignes, 28 colonnes
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 2. Dépendances fonctionnelles
+SQL> --    Méthode : X -> Y tient si chaque valeur de X n'apparaît qu'avec une seule valeur de Y.
+SQL> --    On prend les couples (X, Y) distincts, on regroupe par X, et on compte les X qui ont
+SQL> --    plus d'un Y. Ce nombre est la colonne « violations » : 0 = la DF tient sur les données.
+SQL> --    (SELECT DISTINCT traite deux NULL comme égaux, contrairement à COUNT(DISTINCT) :
+SQL> --    une valeur vide face à une valeur remplie compte bien comme une violation.)
+SQL> --    Une DF qui tient sur les données n'est retenue que si une règle métier la justifie.
+SQL> -- ---------------------------------------------------------------------
+SQL> COLUMN n          FORMAT A3
+SQL> COLUMN dependance FORMAT A75
+SQL> COLUMN conclusion FORMAT A60
+SQL> 
+SQL> -- 2a. Dépendances retenues, et celles que les défauts du CSV violent
+SQL> SELECT 'D1' AS n, 'id_inscription -> toutes les colonnes' AS dependance,
+  2         COUNT(*) AS violations, 'tient : clé de la table à plat' AS conclusion
+  3  FROM  (SELECT id_inscription FROM operation_a_plat GROUP BY id_inscription HAVING COUNT(*) > 1)
+  4  UNION ALL
+  5  SELECT 'D2', 'id_etudiant -> nom, prenom, email, telephone, ville, id_campus_etudiant, date_creation_compte',
+  6         COUNT(*), 'tient : relation ETUDIANT'
+  7  FROM  (SELECT id_etudiant
+  8         FROM  (SELECT DISTINCT id_etudiant, nom, prenom, email, telephone, ville,
+  9                                id_campus_etudiant, date_creation_compte FROM operation_a_plat)
+ 10         GROUP BY id_etudiant HAVING COUNT(*) > 1)
+ 11  UNION ALL
+ 12  SELECT 'D3', 'id_session -> libelle, categorie, id_campus_session, debut, duree, capacite, prix',
+ 13         COUNT(*), 'tient : relation SESSION'
+ 14  FROM  (SELECT id_session
+ 15         FROM  (SELECT DISTINCT id_session, libelle_session, categorie, id_campus_session, debut,
+ 16                                duree_minutes, capacite, prix_unitaire FROM operation_a_plat)
+ 17         GROUP BY id_session HAVING COUNT(*) > 1)
+ 18  UNION ALL
+ 19  SELECT 'D4', 'id_campus -> nom, ville, role (campus de l''étudiant et de la session)',
+ 20         COUNT(*), 'tient : relation CAMPUS (une seule pour les deux rôles)'
+ 21  FROM  (SELECT id_campus
+ 22         FROM  (SELECT id_campus_etudiant AS id_campus, nom_campus_etudiant AS nom,
+ 23                       ville_campus_etudiant AS ville, role_campus_etudiant AS role
+ 24                FROM operation_a_plat
+ 25                UNION                                   -- UNION enlève déjà les doublons
+ 26                SELECT id_campus_session, nom_campus_session, ville_campus_session, role_campus_session
+ 27                FROM operation_a_plat WHERE id_campus_session IS NOT NULL)
+ 28         GROUP BY id_campus HAVING COUNT(*) > 1)
+ 29  UNION ALL
+ 30  SELECT 'D5', 'libelle_session -> id_session',
+ 31         COUNT(*), 'tient : le libellé est une 2e clé de SESSION'
+ 32  FROM  (SELECT libelle_session
+ 33         FROM  (SELECT DISTINCT libelle_session, id_session FROM operation_a_plat
+ 34                WHERE libelle_session IS NOT NULL)
+ 35         GROUP BY libelle_session HAVING COUNT(*) > 1)
+ 36  UNION ALL
+ 37  SELECT 'D6', 'email normalisé (minuscules, sans espaces) -> id_etudiant',
+ 38         COUNT(*), 'violée par les 73 copies : fusion au L2 (RG4)'
+ 39  FROM  (SELECT LOWER(REPLACE(email, ' ', ''))
+ 40         FROM  (SELECT DISTINCT email, id_etudiant FROM operation_a_plat WHERE email IS NOT NULL)
+ 41         GROUP BY LOWER(REPLACE(email, ' ', '')) HAVING COUNT(DISTINCT id_etudiant) > 1)
+ 42  UNION ALL
+ 43  SELECT 'D7', 'id_session, nb_places -> montant',
+ 44         COUNT(*), 'violée par des opérations non valides (rejetées au L2)'
+ 45  FROM  (SELECT id_session, nb_places
+ 46         FROM  (SELECT DISTINCT id_session, nb_places, montant FROM operation_a_plat)
+ 47         GROUP BY id_session, nb_places HAVING COUNT(*) > 1)
+ 48  UNION ALL
+ 49  SELECT 'D8', 'id_groupe -> id_etudiant',
+ 50         COUNT(*), 'violée par des copies d''étudiants : tient après fusion'
+ 51  FROM  (SELECT id_groupe
+ 52         FROM  (SELECT DISTINCT id_groupe, id_etudiant FROM operation_a_plat
+ 53                WHERE id_groupe IS NOT NULL)
+ 54         GROUP BY id_groupe HAVING COUNT(*) > 1)
+ 55  UNION ALL
+ 56  SELECT 'D9', 'id_groupe -> statut',
+ 57         COUNT(*), 'tient : un parcours est confirmé ou annulé en entier'
+ 58  FROM  (SELECT id_groupe
+ 59         FROM  (SELECT DISTINCT id_groupe, statut FROM operation_a_plat WHERE id_groupe IS NOT NULL)
+ 60         GROUP BY id_groupe HAVING COUNT(*) > 1)
+ 61  ORDER BY 1;
+
+N   DEPENDANCE                                                                  VIOLATIONS CONCLUSION                                                  
+--- --------------------------------------------------------------------------- ---------- ------------------------------------------------------------
+D1  id_inscription -> toutes les colonnes                                                0 tient : clé de la table à plat                              
+D2  id_etudiant -> nom, prenom, email, telephone, ville, id_campus_etudiant, da          0 tient : relation ETUDIANT                                   
+    te_creation_compte                                                                                                                                 
+
+D3  id_session -> libelle, categorie, id_campus_session, debut, duree, capacite          0 tient : relation SESSION                                    
+    , prix                                                                                                                                             
+
+D4  id_campus -> nom, ville, role (campus de l'étudiant et de la session)                0 tient : relation CAMPUS (une seule pour les deux rôles)     
+D5  libelle_session -> id_session                                                        0 tient : le libellé est une 2e clé de SESSION                
+D6  email normalisé (minuscules, sans espaces) -> id_etudiant                           73 violée par les 73 copies : fusion au L2 (RG4)               
+D7  id_session, nb_places -> montant                                                    88 violée par des opérations non valides (rejetées au L2)      
+
+N   DEPENDANCE                                                                  VIOLATIONS CONCLUSION                                                  
+--- --------------------------------------------------------------------------- ---------- ------------------------------------------------------------
+D8  id_groupe -> id_etudiant                                                             9 violée par des copies d'étudiants : tient après fusion      
+D9  id_groupe -> statut                                                                  0 tient : un parcours est confirmé ou annulé en entier        
+
+9 lignes sélectionnées. 
+
+SQL> -- Résultat :
+SQL> --   D1  0      D2  0      D3  0      D4  0      D5  0
+SQL> --   D6  73     D7  88     D8  9      D9  0
+SQL> --   D6 : les 73 copies d'étudiants (même e-mail une fois normalisé, id différent).
+SQL> --   D7 : 80 sessions où un montant négatif côtoie le bon montant (le négatif vaut
+SQL> --        exactement -nb_places x prix), + 8 id de session inexistants vus avec plusieurs
+SQL> --        montants. Ce sont les opérations non valides du sujet.
+SQL> --   D8 : 9 parcours passés en partie sous l'id d'une copie : même personne, deux id.
+SQL> 
+SQL> -- 2b. Les mêmes DF après le chargement du L2 (tables nettoyées) : plus aucune violation
+SQL> SELECT 'D6' AS n, 'email -> id_etudiant (ETUDIANT)' AS dependance, COUNT(*) AS violations
+  2  FROM  (SELECT email FROM etudiant WHERE email IS NOT NULL GROUP BY email HAVING COUNT(*) > 1)
+  3  UNION ALL
+  4  SELECT 'D7', 'id_session, nb_places -> montant (INSCRIPTION)', COUNT(*)
+  5  FROM  (SELECT id_session, nb_places FROM inscription
+  6         GROUP BY id_session, nb_places HAVING COUNT(DISTINCT montant) > 1)
+  7  UNION ALL
+  8  SELECT 'D7b', 'montant = nb_places x prix_unitaire (INSCRIPTION, RG12)', COUNT(*)
+  9  FROM   inscription i JOIN session_cours s ON s.id_session = i.id_session
+ 10  WHERE  i.montant <> i.nb_places * s.prix_unitaire
+ 11  UNION ALL
+ 12  SELECT 'D8', 'id_groupe -> id_etudiant (INSCRIPTION)', COUNT(*)
+ 13  FROM  (SELECT id_groupe FROM inscription WHERE id_groupe IS NOT NULL
+ 14         GROUP BY id_groupe HAVING COUNT(DISTINCT id_etudiant) > 1)
+ 15  ORDER BY 1;
+
+N   DEPENDANCE                                                                  VIOLATIONS
+--- --------------------------------------------------------------------------- ----------
+D6  email -> id_etudiant (ETUDIANT)                                                      0
+D7  id_session, nb_places -> montant (INSCRIPTION)                                       0
+D7b montant = nb_places x prix_unitaire (INSCRIPTION, RG12)                              0
+D8  id_groupe -> id_etudiant (INSCRIPTION)                                               0
+
+SQL> -- Résultat : 0 partout. D7b : le montant se recalcule toujours à partir de la session
+SQL> -- (c'est la redondance discutée dans la doc, partie dénormalisation).
+SQL> 
+SQL> -- 2c. Dépendances qu'on pourrait croire vraies, et qu'on ne retient pas
+SQL> SELECT 'N1' AS n, 'id_etudiant -> id_campus_session' AS dependance,
+  2         COUNT(*) AS violations, 'fausse : un étudiant suit des cours sur plusieurs sites' AS conclusion
+  3  FROM  (SELECT id_etudiant
+  4         FROM  (SELECT DISTINCT id_etudiant, id_campus_session FROM operation_a_plat
+  5                WHERE id_campus_session IS NOT NULL)
+  6         GROUP BY id_etudiant HAVING COUNT(*) > 1)
+  7  UNION ALL
+  8  SELECT 'N2', 'telephone -> id_etudiant', COUNT(*), 'fausse : le téléphone n''identifie personne'
+  9  FROM  (SELECT telephone
+ 10         FROM  (SELECT DISTINCT telephone, id_etudiant FROM operation_a_plat WHERE telephone IS NOT NULL)
+ 11         GROUP BY telephone HAVING COUNT(*) > 1)
+ 12  UNION ALL
+ 13  SELECT 'N3', 'categorie -> prix_unitaire', COUNT(*), 'fausse : le prix est fixé session par session'
+ 14  FROM  (SELECT categorie
+ 15         FROM  (SELECT DISTINCT categorie, prix_unitaire FROM operation_a_plat WHERE categorie IS NOT NULL)
+ 16         GROUP BY categorie HAVING COUNT(*) > 1)
+ 17  UNION ALL
+ 18  SELECT 'N4', 'ville (de l''étudiant) -> id_campus_etudiant', COUNT(*),
+ 19         'tient dans les données, pas une règle : non retenue'
+ 20  FROM  (SELECT ville
+ 21         FROM  (SELECT DISTINCT ville, id_campus_etudiant FROM operation_a_plat)
+ 22         GROUP BY ville HAVING COUNT(*) > 1)
+ 23  ORDER BY 1;
+
+N   DEPENDANCE                                                                  VIOLATIONS CONCLUSION                                                  
+--- --------------------------------------------------------------------------- ---------- ------------------------------------------------------------
+N1  id_etudiant -> id_campus_session                                                 12369 fausse : un étudiant suit des cours sur plusieurs sites     
+N2  telephone -> id_etudiant                                                            75 fausse : le téléphone n'identifie personne                  
+N3  categorie -> prix_unitaire                                                           6 fausse : le prix est fixé session par session               
+N4  ville (de l'étudiant) -> id_campus_etudiant                                          0 tient dans les données, pas une règle : non retenue         
+
+SQL> -- Résultat : N1 12 369, N2 75, N3 6, N4 0
+SQL> --   N2 : 73 téléphones partagés par une copie et son original, 2 par deux vraies personnes.
+SQL> --   N4 : coïncidence du jeu de données (chaque étudiant habite la ville de son campus) ;
+SQL> --        aucune règle ne l'impose, un étudiant peut habiter ailleurs. Non retenue.
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 3. Décomposition et vérification « sans perte »
+SQL> --    Chaque DF retenue (D2 à D4) donne une relation dont le déterminant est la clé.
+SQL> --    On projette la table à plat sur ces relations (SELECT DISTINCT), on les rejoint
+SQL> --    par leurs clés, et on compare avec la table à plat dans les deux sens (MINUS).
+SQL> --    0 ligne dans les deux sens = la décomposition ne perd et n'invente aucune ligne.
+SQL> --    Les tables du L1 sont ces relations, après nettoyage (L2), avec en plus :
+SQL> --    CATEGORIE (liste des langues) et l'héritage SIEGE / SITE.
+SQL> -- ---------------------------------------------------------------------
+SQL> WITH r_inscription AS (
+  2      SELECT DISTINCT id_inscription, id_etudiant, id_session, id_groupe, date_operation,
+  3                      nb_places, montant, statut
+  4      FROM   operation_a_plat
+  5  ), r_etudiant AS (
+  6      SELECT DISTINCT id_etudiant, nom, prenom, email, telephone, ville,
+  7                      id_campus_etudiant AS id_campus, date_creation_compte
+  8      FROM   operation_a_plat
+  9  ), r_session AS (
+ 10      SELECT DISTINCT id_session, libelle_session, categorie, id_campus_session AS id_campus,
+ 11                      debut, duree_minutes, capacite, prix_unitaire
+ 12      FROM   operation_a_plat
+ 13      WHERE  libelle_session IS NOT NULL               -- les 220 sessions inexistantes n'en font pas partie
+ 14  ), r_campus AS (
+ 15      SELECT id_campus_etudiant AS id_campus, nom_campus_etudiant AS nom,
+ 16             ville_campus_etudiant AS ville, role_campus_etudiant AS role
+ 17      FROM   operation_a_plat
+ 18      UNION
+ 19      SELECT id_campus_session, nom_campus_session, ville_campus_session, role_campus_session
+ 20      FROM   operation_a_plat WHERE id_campus_session IS NOT NULL
+ 21  ), rejointure AS (
+ 22      SELECT i.id_inscription, i.id_etudiant, i.id_session, i.id_groupe, i.date_operation,
+ 23             i.nb_places, i.montant, i.statut,
+ 24             e.nom, e.prenom, e.email, e.telephone, e.ville,
+ 25             e.id_campus  AS id_campus_etudiant, e.date_creation_compte,
+ 26             ce.nom       AS nom_campus_etudiant, ce.ville AS ville_campus_etudiant,
+ 27             ce.role      AS role_campus_etudiant,
+ 28             s.libelle_session, s.categorie, s.id_campus AS id_campus_session, s.debut,
+ 29             s.duree_minutes, s.capacite, s.prix_unitaire,
+ 30             cs.nom       AS nom_campus_session, cs.ville AS ville_campus_session,
+ 31             cs.role      AS role_campus_session
+ 32      FROM   r_inscription i
+ 33      JOIN   r_etudiant    e  ON e.id_etudiant = i.id_etudiant
+ 34      JOIN   r_campus      ce ON ce.id_campus  = e.id_campus
+ 35      LEFT JOIN r_session  s  ON s.id_session  = i.id_session      -- LEFT : sessions inexistantes
+ 36      LEFT JOIN r_campus   cs ON cs.id_campus  = s.id_campus
+ 37  )
+ 38  SELECT (SELECT COUNT(*) FROM r_inscription) AS nb_inscription,
+ 39         (SELECT COUNT(*) FROM r_etudiant)    AS nb_etudiant,
+ 40         (SELECT COUNT(*) FROM r_session)     AS nb_session,
+ 41         (SELECT COUNT(*) FROM r_campus)      AS nb_campus,
+ 42         (SELECT COUNT(*) FROM (SELECT * FROM rejointure MINUS SELECT * FROM operation_a_plat))
+ 43                                              AS lignes_inventees,
+ 44         (SELECT COUNT(*) FROM (SELECT * FROM operation_a_plat MINUS SELECT * FROM rejointure))
+ 45                                              AS lignes_perdues
+ 46  FROM dual;
+
+NB_INSCRIPTION NB_ETUDIANT NB_SESSION  NB_CAMPUS LIGNES_INVENTEES LIGNES_PERDUES
+-------------- ----------- ---------- ---------- ---------------- --------------
+        354855       21544      47619          3                0              0
+
+SQL> -- Résultat : 354 855 inscriptions, 21 544 étudiants, 47 619 sessions, 3 campus,
+SQL> --            0 ligne inventée, 0 ligne perdue
+SQL> --   3 campus et non 4 : le siège n'a ni étudiant ni session, il n'apparaît donc dans
+SQL> --   aucune opération. C'est l'anomalie d'insertion de la table à plat : on ne peut pas y
+SQL> --   enregistrer un campus (ou un étudiant, une session) qui n'a pas encore d'opération.
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 4. Dénormalisation assumée : le site de la session recopié dans INSCRIPTION
+SQL> --    En 3NF, le site d'une opération se déduit par jointure (RG10, vue V_INSCRIPTION_SITE).
+SQL> --    On le recopie dans INSCRIPTION.id_site, car C5, C6, C8 et la répartition des données
+SQL> --    par site (L5, L6) en ont besoin sans passer par SESSION_COURS. Justification et
+SQL> --    mesures : docs/L3_normalisation/L3_normalisation.md.
+SQL> --
+SQL> --    Cohérence garantie de deux façons :
+SQL> --    - la clé étrangère composite (id_session, id_site) -> SESSION_COURS (id_session,
+SQL> --      id_campus) refuse tout site différent de celui de la session (même principe que
+SQL> --      l'héritage CAMPUS / SITE du L1) ;
+SQL> --    - le trigger TRG_INSCRIPTION_SITE remplit id_site tout seul : les scripts suivants
+SQL> --      (package du L4, etc.) n'ont pas à s'en occuper.
+SQL> --    Conséquence : on ne peut plus changer le site d'une session qui a des inscriptions
+SQL> --    (ORA-02292). C'est voulu : une session ne change pas de ville.
+SQL> -- ---------------------------------------------------------------------
+SQL> ALTER TABLE inscription ADD (id_site NUMBER(4));
+
+Table INSCRIPTION modifié(e).
+
+SQL> 
+SQL> UPDATE inscription i
+  2  SET    i.id_site = (SELECT s.id_campus FROM session_cours s WHERE s.id_session = i.id_session);
+
+354 458 lignes mis à jour.
+
+SQL> COMMIT;
+Validation terminée.
+SQL> 
+SQL> ALTER TABLE inscription MODIFY (id_site CONSTRAINT nn_inscription_site NOT NULL);
+
+Table INSCRIPTION modifié(e).
+
+SQL> 
+SQL> -- cible de la clé étrangère composite
+SQL> ALTER TABLE session_cours ADD CONSTRAINT uq_session_id_site UNIQUE (id_session, id_campus);
+
+Table SESSION_COURS modifié(e).
+
+SQL> 
+SQL> ALTER TABLE inscription ADD CONSTRAINT fk_inscription_session_site
+  2        FOREIGN KEY (id_session, id_site) REFERENCES session_cours (id_session, id_campus);
+
+Table INSCRIPTION modifié(e).
+
+SQL> 
+SQL> COMMENT ON COLUMN inscription.id_site IS 'Dénormalisation assumée (L3) : copie de SESSION_COURS.id_campus, tenue par fk_inscription_session_site et trg_inscription_site.';
+
+Comment créé(e).
+
+SQL> 
+SQL> -- Remplit id_site à chaque nouvelle inscription ou changement de session.
+SQL> -- Une valeur fournie par l'appelant est ignorée : c'est toujours le site de la session.
+SQL> CREATE OR REPLACE TRIGGER trg_inscription_site
+  2  BEFORE INSERT OR UPDATE OF id_session, id_site ON inscription
+  3  FOR EACH ROW
+  4  BEGIN
+  5      SELECT id_campus INTO :NEW.id_site
+  6      FROM   session_cours
+  7      WHERE  id_session = :NEW.id_session;
+  8  EXCEPTION
+  9      WHEN NO_DATA_FOUND THEN
+ 10          RAISE_APPLICATION_ERROR(-20001,
+ 11              'Session ' || :NEW.id_session || ' inexistante : inscription refusée (RG11)');
+ 12  END;
+ 13  /
+
+Elément Trigger TRG_INSCRIPTION_SITE compilé
+
+SQL> 
+SQL> -- Contrôle : le site recopié est toujours celui de la session
+SQL> SELECT COUNT(*) AS inscriptions,
+  2         SUM(CASE WHEN i.id_site = s.id_campus THEN 1 ELSE 0 END) AS site_coherent
+  3  FROM   inscription i
+  4  JOIN   session_cours s ON s.id_session = i.id_session;
+
+INSCRIPTIONS SITE_COHERENT
+------------ -------------
+      354458        354458
+
+SQL> -- Résultat : 354 458 inscriptions, 354 458 cohérentes
+SQL> @@06_triggers.sql
+SQL> -- =====================================================================
+SQL> -- 06_triggers.sql
+SQL> -- Livrable : L4 · Fiabilité
+SQL> -- Responsable : Baptiste (avec Claude Code)
+SQL> -- Attendu  : au moins 2 triggers, dont un journal d'audit
+SQL> -- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+SQL> --
+SQL> -- Contenu :
+SQL> --   1. AUDIT_INSCRIPTION + trigger TRG_INSCRIPTION_AUDIT   : journal d'audit des opérations
+SQL> --   2. TRG_INSCRIPTION_REGLES   : RG12 (montant calculé), RG11 (date <= début), RG14 (compte)
+SQL> --   3. TRG_INSCRIPTION_DOUBLON  : RG13 (une seule inscription confirmée par étudiant et session)
+SQL> --   4. TRG_ETUDIANT_PARRAIN     : RG7 (le parrain a un compte plus ancien)
+SQL> --   Le trigger TRG_INSCRIPTION_SITE (remplit id_site) est créé au L3 (05_normalisation.sql).
+SQL> --
+SQL> -- Les triggers sont créés APRÈS le chargement (02) : ils ne contrôlent que les nouvelles
+SQL> -- opérations. Les données historiques qui violent RG13 et RG14 restent telles quelles
+SQL> -- (décision du L2 : elles sont valides au sens du sujet et comptent dans C3 à C9).
+SQL> --
+SQL> -- Codes d'erreur (RAISE_APPLICATION_ERROR) :
+SQL> --   -20001 session inexistante (L3)     -20002 inscription avant la création du compte (RG14)
+SQL> --   -20003 inscription après le début   -20004 étudiant déjà inscrit en confirmé (RG13)
+SQL> --   -20005 parrain plus récent (RG7)    -20010 à -20019 : package du parcours (07)
+SQL> -- Tests : preuves/L4_tests_fiabilite.sql
+SQL> -- =====================================================================
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 1. Journal d'audit des inscriptions
+SQL> --    Une ligne par inscription créée, modifiée ou supprimée : qui, quand, quoi, avant / après.
+SQL> --    Pas de clé étrangère vers INSCRIPTION : la trace doit rester après un DELETE.
+SQL> --    Pas de nom ni d'e-mail : l'id de l'étudiant suffit (minimisation RGPD).
+SQL> --    Le trigger écrit dans la même transaction que l'opération : si l'opération est
+SQL> --    annulée (ROLLBACK, parcours refusé), sa trace l'est aussi. Le journal ne contient donc
+SQL> --    que ce qui a vraiment été enregistré. (Une transaction autonome garderait aussi les
+SQL> --    tentatives refusées, mais elle tracerait des opérations qui n'ont jamais existé.)
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE TABLE audit_inscription (
+  2      id_audit          NUMBER(12) GENERATED ALWAYS AS IDENTITY,
+  3      date_action       TIMESTAMP          DEFAULT SYSTIMESTAMP
+  4                                           CONSTRAINT nn_audit_date        NOT NULL,
+  5      utilisateur       VARCHAR2(128 CHAR) CONSTRAINT nn_audit_utilisateur NOT NULL,
+  6      action            VARCHAR2(6 CHAR)   CONSTRAINT nn_audit_action      NOT NULL,
+  7      id_inscription    NUMBER(10)         CONSTRAINT nn_audit_inscription NOT NULL,
+  8      id_etudiant       NUMBER(8),
+  9      id_session        NUMBER(8),
+ 10      id_groupe         VARCHAR2(10 CHAR),
+ 11      ancien_statut     VARCHAR2(10 CHAR),
+ 12      nouveau_statut    VARCHAR2(10 CHAR),
+ 13      ancien_nb_places  NUMBER(3),
+ 14      nouveau_nb_places NUMBER(3),
+ 15      ancien_montant    NUMBER(9,2),
+ 16      nouveau_montant   NUMBER(9,2),
+ 17      CONSTRAINT pk_audit_inscription PRIMARY KEY (id_audit),
+ 18      CONSTRAINT ck_audit_action      CHECK (action IN ('INSERT', 'UPDATE', 'DELETE'))
+ 19  );
+
+Table AUDIT_INSCRIPTION créé(e).
+
+SQL> 
+SQL> COMMENT ON TABLE audit_inscription IS 'L4 : journal d''audit des opérations (INSCRIPTION), rempli par trg_inscription_audit.';
+
+Comment créé(e).
+
+SQL> 
+SQL> CREATE OR REPLACE TRIGGER trg_inscription_audit
+  2  AFTER INSERT OR UPDATE OR DELETE ON inscription
+  3  FOR EACH ROW
+  4  DECLARE
+  5      v_action audit_inscription.action%TYPE;
+  6  BEGIN
+  7      v_action := CASE WHEN INSERTING THEN 'INSERT' WHEN UPDATING THEN 'UPDATE' ELSE 'DELETE' END;
+  8  
+  9      INSERT INTO audit_inscription (
+ 10          utilisateur, action, id_inscription, id_etudiant, id_session, id_groupe,
+ 11          ancien_statut, nouveau_statut, ancien_nb_places, nouveau_nb_places,
+ 12          ancien_montant, nouveau_montant)
+ 13      VALUES (
+ 14          SYS_CONTEXT('USERENV', 'SESSION_USER'), v_action,
+ 15          NVL(:NEW.id_inscription, :OLD.id_inscription),
+ 16          NVL(:NEW.id_etudiant,    :OLD.id_etudiant),
+ 17          NVL(:NEW.id_session,     :OLD.id_session),
+ 18          NVL(:NEW.id_groupe,      :OLD.id_groupe),
+ 19          :OLD.statut,    :NEW.statut,             -- :OLD est vide pour un INSERT,
+ 20          :OLD.nb_places, :NEW.nb_places,          -- :NEW est vide pour un DELETE
+ 21          :OLD.montant,   :NEW.montant);
+ 22  END;
+ 23  /
+
+Elément Trigger TRG_INSCRIPTION_AUDIT compilé
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 2. Règles d'une inscription qui ne portent que sur la ligne et ses parents
+SQL> --    RG12 : le montant est calculé (nb_places x prix de la session) ; une valeur fournie
+SQL> --           par l'appelant est remplacée. Même principe que id_site au L3.
+SQL> --    RG11 : une opération passée après le début de la session n'est pas valide : refusée.
+SQL> --    RG14 : une inscription ne peut pas précéder la création du compte de l'étudiant.
+SQL> --           Le compte est daté au jour près : une inscription le même jour est acceptée.
+SQL> --    Ne se déclenche pas sur un simple changement de statut (annulation) : les lignes
+SQL> --    historiques peuvent donc être annulées sans être revérifiées.
+SQL> --    FOLLOWS : passe après TRG_INSCRIPTION_SITE, qui refuse déjà une session inexistante.
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE OR REPLACE TRIGGER trg_inscription_regles
+  2  BEFORE INSERT OR UPDATE OF id_session, id_etudiant, nb_places, montant, date_operation
+  3  ON inscription
+  4  FOR EACH ROW
+  5  FOLLOWS trg_inscription_site
+  6  DECLARE
+  7      v_prix      session_cours.prix_unitaire%TYPE;
+  8      v_debut     session_cours.debut%TYPE;
+  9      v_creation  etudiant.date_inscription%TYPE;
+ 10  BEGIN
+ 11      SELECT prix_unitaire, debut INTO v_prix, v_debut
+ 12      FROM   session_cours
+ 13      WHERE  id_session = :NEW.id_session;
+ 14  
+ 15      -- RG12
+ 16      :NEW.montant := :NEW.nb_places * v_prix;
+ 17  
+ 18      -- RG11 (définition d'une opération valide)
+ 19      IF :NEW.date_operation > v_debut THEN
+ 20          RAISE_APPLICATION_ERROR(-20003,
+ 21              'Inscription du ' || TO_CHAR(:NEW.date_operation, 'DD/MM/YYYY HH24:MI')
+ 22              || ' après le début de la session ' || :NEW.id_session
+ 23              || ' (' || TO_CHAR(v_debut, 'DD/MM/YYYY HH24:MI') || ') : refusée (RG11)');
+ 24      END IF;
+ 25  
+ 26      -- RG14
+ 27      IF INSERTING OR UPDATING('date_operation') OR UPDATING('id_etudiant') THEN
+ 28          -- MAX renvoie NULL au lieu de NO_DATA_FOUND : un étudiant inexistant est
+ 29          -- refusé ensuite par la clé étrangère fk_inscription_etudiant.
+ 30          SELECT MAX(date_inscription) INTO v_creation
+ 31          FROM   etudiant
+ 32          WHERE  id_etudiant = :NEW.id_etudiant;
+ 33  
+ 34          IF TRUNC(:NEW.date_operation) < v_creation THEN
+ 35              RAISE_APPLICATION_ERROR(-20002,
+ 36                  'Inscription du ' || TO_CHAR(:NEW.date_operation, 'DD/MM/YYYY')
+ 37                  || ' antérieure à la création du compte de l''étudiant ' || :NEW.id_etudiant
+ 38                  || ' (' || TO_CHAR(v_creation, 'DD/MM/YYYY') || ') : refusée (RG14)');
+ 39          END IF;
+ 40      END IF;
+ 41  END;
+ 42  /
+
+Elément Trigger TRG_INSCRIPTION_REGLES compilé
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 3. RG13 : un étudiant n'a qu'une inscription confirmée par session
+SQL> --    La règle porte sur plusieurs lignes d'INSCRIPTION. Un trigger ligne ne peut pas lire
+SQL> --    la table qu'il modifie (ORA-04091, table en mutation) dès qu'un ordre touche plusieurs
+SQL> --    lignes. D'où un trigger composé : chaque ligne note son couple (étudiant, session),
+SQL> --    et la vérification se fait une fois l'ordre terminé (AFTER STATEMENT).
+SQL> --    Pas d'index unique : les 154 couples historiques en double l'empêcheraient.
+SQL> --    Seuls les couples touchés par l'ordre sont vérifiés : l'historique n'est pas relu.
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE OR REPLACE TRIGGER trg_inscription_doublon
+  2  FOR INSERT OR UPDATE OF statut, id_etudiant, id_session ON inscription
+  3  COMPOUND TRIGGER
+  4  
+  5      TYPE t_couple  IS RECORD (id_etudiant NUMBER(8), id_session NUMBER(8));
+  6      TYPE t_couples IS TABLE OF t_couple;
+  7      g_couples t_couples := t_couples();
+  8  
+  9      AFTER EACH ROW IS
+ 10      BEGIN
+ 11          IF :NEW.statut = 'CONFIRMEE' THEN
+ 12              g_couples.EXTEND;
+ 13              g_couples(g_couples.LAST).id_etudiant := :NEW.id_etudiant;
+ 14              g_couples(g_couples.LAST).id_session  := :NEW.id_session;
+ 15          END IF;
+ 16      END AFTER EACH ROW;
+ 17  
+ 18      AFTER STATEMENT IS
+ 19          v_nb NUMBER;
+ 20      BEGIN
+ 21          FOR k IN 1 .. g_couples.COUNT LOOP
+ 22              SELECT COUNT(*) INTO v_nb
+ 23              FROM   inscription
+ 24              WHERE  id_etudiant = g_couples(k).id_etudiant
+ 25              AND    id_session  = g_couples(k).id_session
+ 26              AND    statut      = 'CONFIRMEE';
+ 27  
+ 28              IF v_nb > 1 THEN
+ 29                  RAISE_APPLICATION_ERROR(-20004,
+ 30                      'L''étudiant ' || g_couples(k).id_etudiant
+ 31                      || ' est déjà inscrit en confirmé à la session '
+ 32                      || g_couples(k).id_session || ' : refusé (RG13)');
+ 33              END IF;
+ 34          END LOOP;
+ 35      END AFTER STATEMENT;
+ 36  
+ 37  END trg_inscription_doublon;
+ 38  /
+
+Elément Trigger TRG_INSCRIPTION_DOUBLON compilé
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 4. RG7 : le parrain a un compte strictement plus ancien que son filleul
+SQL> --    Même raison que pour RG13 (le parrain est dans la même table ETUDIANT) : trigger composé.
+SQL> --    On vérifie l'étudiant modifié comme filleul (son parrain) et comme parrain (ses
+SQL> --    filleuls), car changer la date de création d'un parrain peut casser la règle.
+SQL> --    Le CHECK ck_etudiant_pas_son_parrain (L1) refuse déjà d'être son propre parrain.
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE OR REPLACE TRIGGER trg_etudiant_parrain
+  2  FOR INSERT OR UPDATE OF id_parrain, date_inscription ON etudiant
+  3  COMPOUND TRIGGER
+  4  
+  5      TYPE t_ids IS TABLE OF NUMBER(8);
+  6      g_ids t_ids := t_ids();
+  7  
+  8      AFTER EACH ROW IS
+  9      BEGIN
+ 10          g_ids.EXTEND;
+ 11          g_ids(g_ids.LAST) := :NEW.id_etudiant;
+ 12      END AFTER EACH ROW;
+ 13  
+ 14      AFTER STATEMENT IS
+ 15          v_filleul NUMBER(8);
+ 16          v_parrain NUMBER(8);
+ 17      BEGIN
+ 18          FOR k IN 1 .. g_ids.COUNT LOOP
+ 19              SELECT MIN(f.id_etudiant), MIN(p.id_etudiant) INTO v_filleul, v_parrain
+ 20              FROM   etudiant f
+ 21              JOIN   etudiant p ON p.id_etudiant = f.id_parrain
+ 22              WHERE  (f.id_etudiant = g_ids(k) OR p.id_etudiant = g_ids(k))
+ 23              AND    p.date_inscription >= f.date_inscription;
+ 24  
+ 25              IF v_filleul IS NOT NULL THEN
+ 26                  RAISE_APPLICATION_ERROR(-20005,
+ 27                      'Le parrain ' || v_parrain || ' n''a pas un compte plus ancien que son filleul '
+ 28                      || v_filleul || ' : refusé (RG7)');
+ 29              END IF;
+ 30          END LOOP;
+ 31      END AFTER STATEMENT;
+ 32  
+ 33  END trg_etudiant_parrain;
+ 34  /
+
+Elément Trigger TRG_ETUDIANT_PARRAIN compilé
+
+SQL> 
+SQL> 
+SQL> -- Contrôle : les 5 triggers du schéma (1 du L3, 4 du L4) sont compilés et actifs
+SQL> COLUMN trigger_name FORMAT A25
+SQL> COLUMN table_name   FORMAT A15
+SQL> COLUMN trigger_type FORMAT A20
+SQL> SELECT t.trigger_name, t.table_name, t.trigger_type, t.status, o.status AS compilation
+  2  FROM   user_triggers t
+  3  JOIN   user_objects  o ON o.object_name = t.trigger_name AND o.object_type = 'TRIGGER'
+  4  ORDER BY t.table_name, t.trigger_name;
+
+TRIGGER_NAME              TABLE_NAME      TRIGGER_TYPE         STATUS   COMPILA
+------------------------- --------------- -------------------- -------- -------
+TRG_ETUDIANT_PARRAIN      ETUDIANT        COMPOUND             ENABLED  VALID  
+TRG_INSCRIPTION_AUDIT     INSCRIPTION     AFTER EACH ROW       ENABLED  VALID  
+TRG_INSCRIPTION_DOUBLON   INSCRIPTION     COMPOUND             ENABLED  VALID  
+TRG_INSCRIPTION_REGLES    INSCRIPTION     BEFORE EACH ROW      ENABLED  VALID  
+TRG_INSCRIPTION_SITE      INSCRIPTION     BEFORE EACH ROW      ENABLED  VALID  
+
+SQL> -- Résultat attendu : 5 lignes, ENABLED et VALID
+SQL> @@07_package_parcours.sql
+SQL> -- =====================================================================
+SQL> -- 07_package_parcours.sql
+SQL> -- Livrable : L4 · Fiabilité
+SQL> -- Responsable : Baptiste (avec Claude Code)
+SQL> -- Attendu  : package : procédure du parcours multi-sites, tout ou rien, qui refuse la sur-réservation
+SQL> -- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+SQL> --
+SQL> -- Le parcours (opération groupée, RG16) : un étudiant s'inscrit en une fois à plusieurs
+SQL> -- sessions, souvent dans plusieurs sites. Toutes les inscriptions partagent un id_groupe.
+SQL> -- On impose au moins 2 sessions (comme les 2 667 parcours du CSV, qui en ont 2 à 4), mais
+SQL> -- pas 2 sites : 793 parcours historiques restent sur un seul site, et C8 les distingue.
+SQL> --
+SQL> -- Contenu :
+SQL> --   1. Séquences SEQ_INSCRIPTION et SEQ_GROUPE (numéros des nouvelles opérations)
+SQL> --   2. Type T_LISTE_SESSIONS (la liste des sessions passée à la procédure)
+SQL> --   3. Package PKG_PARCOURS :
+SQL> --        inscrire_parcours  : tout ou rien, refuse la sur-réservation (RG15, RG16)
+SQL> --        annuler_parcours   : annule toutes les inscriptions d'un parcours
+SQL> --        places_restantes   : capacité - places confirmées d'une session
+SQL> --
+SQL> -- Le package ne fait ni COMMIT ni ROLLBACK complet : c'est l'appelant qui valide.
+SQL> --   - en cas de succès : les inscriptions sont posées, l'appelant fait COMMIT ;
+SQL> --   - en cas d'erreur  : ROLLBACK TO SAVEPOINT, la base revient à l'état d'avant l'appel
+SQL> --     (même les inscriptions déjà posées dans la boucle), puis l'erreur est renvoyée.
+SQL> -- Tests : preuves/L4_tests_fiabilite.sql. Concurrence : sql/L4_concurrence_session_A/B.sql
+SQL> -- =====================================================================
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 1. Séquences
+SQL> --    Elles démarrent après le plus grand numéro déjà utilisé, rejets compris : un id
+SQL> --    écarté au chargement (INSCRIPTION_REJET) n'est jamais réattribué, la trace reste claire.
+SQL> --    START WITH n'accepte pas de sous-requête, d'où le SQL dynamique.
+SQL> -- ---------------------------------------------------------------------
+SQL> DECLARE
+  2      v_inscription NUMBER;
+  3      v_groupe      NUMBER;
+  4  BEGIN
+  5      SELECT NVL(MAX(id_inscription), 0) + 1 INTO v_inscription
+  6      FROM  (SELECT id_inscription FROM inscription
+  7             UNION ALL
+  8             SELECT id_inscription FROM inscription_rejet);
+  9  
+ 10      SELECT NVL(MAX(TO_NUMBER(SUBSTR(id_groupe, 2))), 0) + 1 INTO v_groupe
+ 11      FROM  (SELECT id_groupe FROM inscription       WHERE id_groupe IS NOT NULL
+ 12             UNION ALL
+ 13             SELECT id_groupe FROM inscription_rejet WHERE id_groupe IS NOT NULL);
+ 14  
+ 15      EXECUTE IMMEDIATE 'CREATE SEQUENCE seq_inscription START WITH ' || v_inscription;
+ 16      -- MAXVALUE : le format G + 5 chiffres (ck_inscription_groupe) s'arrête à G99999
+ 17      EXECUTE IMMEDIATE 'CREATE SEQUENCE seq_groupe START WITH ' || v_groupe || ' MAXVALUE 99999';
+ 18  END;
+ 19  /
+
+Procédure PL/SQL terminée.
+
+SQL> 
+SQL> COLUMN sequence_name FORMAT A16
+SQL> SELECT sequence_name, last_number AS prochain_numero
+  2  FROM   user_sequences
+  3  WHERE  sequence_name IN ('SEQ_INSCRIPTION', 'SEQ_GROUPE')
+  4  ORDER BY 1;
+
+SEQUENCE_NAME    PROCHAIN_NUMERO
+---------------- ---------------
+SEQ_GROUPE                  2668
+SEQ_INSCRIPTION           354856
+
+SQL> -- Résultat : SEQ_GROUPE 2668 (dernier parcours : G02667), SEQ_INSCRIPTION 354856
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 2. Type de la liste de sessions
+SQL> --    Type SQL (et non type déclaré dans le package) : il s'écrit directement à l'appel,
+SQL> --    t_liste_sessions(101, 2045, 3310), et se lit en SQL avec TABLE(...).
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE OR REPLACE TYPE t_liste_sessions AS TABLE OF NUMBER(8);
+  2  /
+
+Elément Type T_LISTE_SESSIONS compilé
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 3. Package
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE OR REPLACE PACKAGE pkg_parcours AS
+  2  
+  3      -- Inscrit p_id_etudiant à toutes les sessions de p_sessions, p_nb_places chacune,
+  4      -- sous un nouvel id_groupe (renvoyé dans p_id_groupe). Tout ou rien : si une seule
+  5      -- session est pleine ou si une règle est violée, aucune inscription n'est gardée.
+  6      -- p_date_operation : date de l'opération, maintenant par défaut (paramètre utile pour
+  7      -- les tests, les sessions du jeu de données s'arrêtant au 31/12/2026).
+  8      PROCEDURE inscrire_parcours (
+  9          p_id_etudiant     IN  etudiant.id_etudiant%TYPE,
+ 10          p_sessions        IN  t_liste_sessions,
+ 11          p_nb_places       IN  inscription.nb_places%TYPE DEFAULT 1,
+ 12          p_date_operation  IN  DATE DEFAULT SYSDATE,
+ 13          p_id_groupe       OUT inscription.id_groupe%TYPE);
+ 14  
+ 15      -- Annule toutes les inscriptions confirmées d'un parcours, en un seul ordre UPDATE
+ 16      -- (un parcours est confirmé ou annulé en entier : DF D9 du L3).
+ 17      PROCEDURE annuler_parcours (p_id_groupe IN inscription.id_groupe%TYPE);
+ 18  
+ 19      -- Places encore libres d'une session (négatif pour une session sur-réservée).
+ 20      FUNCTION places_restantes (p_id_session IN session_cours.id_session%TYPE) RETURN NUMBER;
+ 21  
+ 22  END pkg_parcours;
+ 23  /
+
+Elément Package PKG_PARCOURS compilé
+
+SQL> 
+SQL> CREATE OR REPLACE PACKAGE BODY pkg_parcours AS
+  2  
+  3      FUNCTION places_restantes (p_id_session IN session_cours.id_session%TYPE) RETURN NUMBER IS
+  4          v_capacite  session_cours.capacite%TYPE;
+  5          v_occupees  NUMBER;
+  6      BEGIN
+  7          SELECT capacite INTO v_capacite FROM session_cours WHERE id_session = p_id_session;
+  8  
+  9          SELECT NVL(SUM(nb_places), 0) INTO v_occupees
+ 10          FROM   inscription
+ 11          WHERE  id_session = p_id_session
+ 12          AND    statut     = 'CONFIRMEE';
+ 13  
+ 14          RETURN v_capacite - v_occupees;
+ 15      END places_restantes;
+ 16  
+ 17  
+ 18      PROCEDURE inscrire_parcours (
+ 19          p_id_etudiant     IN  etudiant.id_etudiant%TYPE,
+ 20          p_sessions        IN  t_liste_sessions,
+ 21          p_nb_places       IN  inscription.nb_places%TYPE DEFAULT 1,
+ 22          p_date_operation  IN  DATE DEFAULT SYSDATE,
+ 23          p_id_groupe       OUT inscription.id_groupe%TYPE)
+ 24      IS
+ 25          v_nb_sessions  NUMBER;
+ 26          v_nb_distinct  NUMBER;
+ 27          v_capacite     session_cours.capacite%TYPE;
+ 28          v_restantes    NUMBER;
+ 29      BEGIN
+ 30          -- Contrôles de la demande, avant toute écriture
+ 31          SELECT COUNT(*), COUNT(DISTINCT column_value) INTO v_nb_sessions, v_nb_distinct
+ 32          FROM   TABLE(p_sessions);
+ 33  
+ 34          IF v_nb_sessions < 2 THEN
+ 35              RAISE_APPLICATION_ERROR(-20011,
+ 36                  'Un parcours compte au moins 2 sessions (' || v_nb_sessions || ' reçue(s))');
+ 37          END IF;
+ 38          IF v_nb_distinct < v_nb_sessions THEN
+ 39              RAISE_APPLICATION_ERROR(-20012, 'La même session apparaît deux fois dans le parcours');
+ 40          END IF;
+ 41  
+ 42          -- Point de retour du « tout ou rien »
+ 43          SAVEPOINT avant_parcours;
+ 44  
+ 45          BEGIN
+ 46              p_id_groupe := 'G' || TO_CHAR(seq_groupe.NEXTVAL, 'FM00000');
+ 47  
+ 48              -- Sessions prises dans l'ordre croissant de leur id : deux parcours qui
+ 49              -- partagent des sessions les verrouillent dans le même ordre, ce qui évite
+ 50              -- l'interblocage (ORA-00060) entre eux.
+ 51              FOR s IN (SELECT column_value AS id_session FROM TABLE(p_sessions) ORDER BY 1) LOOP
+ 52  
+ 53                  -- Verrou sur la ligne de la session (correction de l'anomalie de
+ 54                  -- concurrence) : une autre transaction qui veut des places dans cette
+ 55                  -- session attend ici notre COMMIT ou ROLLBACK. Le comptage qui suit voit
+ 56                  -- donc toutes les places déjà validées par les autres.
+ 57                  BEGIN
+ 58                      SELECT capacite INTO v_capacite
+ 59                      FROM   session_cours
+ 60                      WHERE  id_session = s.id_session
+ 61                      FOR UPDATE;
+ 62                  EXCEPTION
+ 63                      WHEN NO_DATA_FOUND THEN
+ 64                          RAISE_APPLICATION_ERROR(-20013,
+ 65                              'Session ' || s.id_session || ' inexistante : parcours refusé (RG11)');
+ 66                  END;
+ 67  
+ 68                  -- RG15 : refus de la sur-réservation
+ 69                  v_restantes := places_restantes(s.id_session);
+ 70                  IF v_restantes < p_nb_places THEN
+ 71                      RAISE_APPLICATION_ERROR(-20010,
+ 72                          'Session ' || s.id_session || ' : ' || GREATEST(v_restantes, 0)
+ 73                          || ' place(s) libre(s) sur ' || v_capacite || ', ' || p_nb_places
+ 74                          || ' demandée(s) : parcours refusé, aucune inscription gardée (RG15)');
+ 75                  END IF;
+ 76  
+ 77                  -- montant et id_site sont remplis par les triggers (RG12, L3) ;
+ 78                  -- RG11, RG13 et RG14 sont vérifiées par les triggers à cet INSERT.
+ 79                  INSERT INTO inscription (id_inscription, id_etudiant, id_session, id_groupe,
+ 80                                           date_operation, nb_places, montant, statut)
+ 81                  VALUES (seq_inscription.NEXTVAL, p_id_etudiant, s.id_session, p_id_groupe,
+ 82                          p_date_operation, p_nb_places, NULL, 'CONFIRMEE');
+ 83              END LOOP;
+ 84  
+ 85          EXCEPTION
+ 86              WHEN OTHERS THEN
+ 87                  -- Tout ou rien : on défait les inscriptions déjà posées par cet appel
+ 88                  -- (et leurs lignes d'audit), puis on renvoie l'erreur d'origine.
+ 89                  ROLLBACK TO SAVEPOINT avant_parcours;
+ 90                  p_id_groupe := NULL;
+ 91                  RAISE;
+ 92          END;
+ 93      END inscrire_parcours;
+ 94  
+ 95  
+ 96      PROCEDURE annuler_parcours (p_id_groupe IN inscription.id_groupe%TYPE) IS
+ 97      BEGIN
+ 98          UPDATE inscription
+ 99          SET    statut = 'ANNULEE'
+100          WHERE  id_groupe = p_id_groupe
+101          AND    statut    = 'CONFIRMEE';
+102  
+103          IF SQL%ROWCOUNT = 0 THEN
+104              RAISE_APPLICATION_ERROR(-20014,
+105                  'Parcours ' || p_id_groupe || ' introuvable ou déjà annulé');
+106          END IF;
+107      END annuler_parcours;
+108  
+109  END pkg_parcours;
+110  /
+
+Elément Package Body PKG_PARCOURS compilé
+
+SQL> 
+SQL> 
+SQL> -- Contrôle : package compilé sans erreur
+SQL> COLUMN object_name FORMAT A16
+SQL> COLUMN object_type FORMAT A12
+SQL> SELECT object_name, object_type, status
+  2  FROM   user_objects
+  3  WHERE  object_name IN ('PKG_PARCOURS', 'T_LISTE_SESSIONS')
+  4  ORDER BY object_type;
+
+OBJECT_NAME      OBJECT_TYPE  STATUS 
+---------------- ------------ -------
+PKG_PARCOURS     PACKAGE      VALID  
+PKG_PARCOURS     PACKAGE BODY VALID  
+T_LISTE_SESSIONS TYPE         VALID  
+
+SQL> -- Résultat attendu : PACKAGE, PACKAGE BODY et TYPE, tous VALID
+SQL> @@08_performance.sql
+SQL> -- =====================================================================
+SQL> -- 08_performance.sql
+SQL> -- Livrable : L5 · Performance
+SQL> -- Responsable : Baptiste (avec Claude Code)
+SQL> -- Attendu  : 3 requêtes lentes : plan + blocs lus avant/après ; vue matérialisée ou partitionnement
+SQL> -- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+SQL> --
+SQL> -- Trois requêtes que l'école lance souvent, toutes lentes sur nos 354 458 inscriptions,
+SQL> -- car elles parcourent toute la table INSCRIPTION (2 304 blocs) :
+SQL> --   Q1  l'historique d'un étudiant (accueil, à chaque visite)       -> index
+SQL> --   Q2  les places libres d'une session (à chaque inscription : c'est
+SQL> --       le contrôle du package du L4, au pic de la rentrée)        -> index couvrant
+SQL> --   Q3  le tableau de bord : places et CA par site et par langue    -> vue matérialisée
+SQL> --
+SQL> -- Méthode de mesure (la même pour les 6 exécutions) :
+SQL> --   - chaque requête porte le hint GATHER_PLAN_STATISTICS : Oracle compte, pour chaque
+SQL> --     étape du plan, les lignes réellement produites et les blocs lus (colonne Buffers) ;
+SQL> --   - un repère dans le hint (L5_Q1_AVANT, ...) permet de retrouver la requête dans V$SQL ;
+SQL> --   - DBMS_XPLAN.DISPLAY_CURSOR(..., 'ALLSTATS LAST') affiche le plan réellement suivi ;
+SQL> --   - le tableau L5_MESURE résume les blocs lus avant / après.
+SQL> --   Lecture de V$SQL : SELECT_CATALOG_ROLE, donné par installation_system.sql.
+SQL> --   « Blocs lus » = lectures logiques (Buffers). C'est la mesure stable : elle ne dépend
+SQL> --   pas de ce qui est déjà en mémoire, contrairement au temps.
+SQL> -- =====================================================================
+SQL> SET LINESIZE 200
+SQL> SET PAGESIZE 200
+SQL> COLUMN plan_table_output FORMAT A160
+SQL> COLUMN libelle FORMAT A25
+SQL> COLUMN langue  FORMAT A10
+SQL> COLUMN statut  FORMAT A9
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 0. Statistiques à jour : l'optimiseur choisit ses plans à partir d'elles
+SQL> -- ---------------------------------------------------------------------
+SQL> BEGIN
+  2      FOR t IN (SELECT table_name FROM user_tables
+  3                WHERE table_name IN ('INSCRIPTION', 'SESSION_COURS', 'ETUDIANT', 'CATEGORIE')) LOOP
+  4          DBMS_STATS.GATHER_TABLE_STATS(USER, t.table_name);
+  5      END LOOP;
+  6  END;
+  7  /
+
+Procédure PL/SQL terminée.
+
+SQL> 
+SQL> CREATE TABLE l5_mesure (
+  2      requete     VARCHAR2(4 CHAR)   CONSTRAINT nn_l5_mesure_requete NOT NULL,
+  3      version     VARCHAR2(5 CHAR)   CONSTRAINT nn_l5_mesure_version NOT NULL,
+  4      optimisation VARCHAR2(60 CHAR),
+  5      blocs_lus   NUMBER,
+  6      lignes      NUMBER,
+  7      CONSTRAINT pk_l5_mesure PRIMARY KEY (requete, version),
+  8      CONSTRAINT ck_l5_mesure_version CHECK (version IN ('AVANT', 'APRES'))
+  9  );
+
+Table L5_MESURE créé(e).
+
+SQL> COMMENT ON TABLE l5_mesure IS 'L5 : blocs lus par les 3 requêtes lentes, avant et après optimisation (rempli par 08_performance.sql).';
+
+Comment créé(e).
+
+SQL> 
+SQL> 
+SQL> -- =====================================================================
+SQL> -- Q1. Historique d'un étudiant (ici l'étudiant 2141 : 17 inscriptions, la moyenne)
+SQL> -- =====================================================================
+SQL> SELECT /*+ GATHER_PLAN_STATISTICS L5_Q1_AVANT */
+  2         i.id_inscription, i.date_operation, s.libelle, s.debut, i.nb_places, i.montant, i.statut
+  3  FROM   inscription i
+  4  JOIN   session_cours s ON s.id_session = i.id_session
+  5  WHERE  i.id_etudiant = 2141
+  6  ORDER BY i.date_operation;
+
+ID_INSCRIPTION DATE_OPE LIBELLE                   DEBUT     NB_PLACES    MONTANT STATUT   
+-------------- -------- ------------------------- -------- ---------- ---------- ---------
+        145558 02/04/25 Session allemand 19988    03/04/25          1        438 CONFIRMEE
+        237334 26/06/25 Session FLE 32547         09/08/25          1        497 CONFIRMEE
+        100513 29/07/25 Session anglais 13769     10/09/25          1        552 CONFIRMEE
+        266372 04/09/25 Session allemand 36531    29/09/25          1        509 CONFIRMEE
+         73963 05/09/25 Session allemand 10124    25/09/25          1        311 CONFIRMEE
+        206490 24/11/25 Session chinois 28322     15/01/26          1        237 ANNULEE  
+         97234 09/01/26 Session espagnol 13325    13/01/26          1        398 ANNULEE  
+         18884 12/01/26 Session allemand 2586     16/01/26          1        203 CONFIRMEE
+        315036 28/01/26 Session chinois 43235     20/02/26          1        210 ANNULEE  
+        171942 02/02/26 Session chinois 23607     09/03/26          1        572 CONFIRMEE
+        205555 25/02/26 Session chinois 28191     31/03/26          1        171 CONFIRMEE
+         20591 26/03/26 Session anglais 2823      03/05/26          1        279 CONFIRMEE
+         40360 27/03/26 Session FLE 5543          13/04/26          1        220 CONFIRMEE
+        246763 10/09/26 Session anglais 33833     18/10/26          1        517 CONFIRMEE
+        111543 26/10/26 Session chinois 15279     17/11/26          1        561 CONFIRMEE
+         73028 23/11/26 Session espagnol 9996     23/12/26          1        530 ANNULEE  
+         16816 18/12/26 Session espagnol 2301     28/12/26          1        461 CONFIRMEE
+
+17 lignes sélectionnées. 
+
+SQL> 
+SQL> SELECT p.plan_table_output
+  2  FROM  (SELECT sql_id, child_number FROM v$sql
+  3         WHERE  sql_text LIKE '%L5_Q1_AVANT%' AND sql_text NOT LIKE '%v$sql%'
+  4         ORDER BY last_active_time DESC FETCH FIRST 1 ROW ONLY) q,
+  5         TABLE(DBMS_XPLAN.DISPLAY_CURSOR(q.sql_id, q.child_number, 'ALLSTATS LAST')) p;
+
+PLAN_TABLE_OUTPUT                                                                                                                                               
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+SQL_ID  af9t9dqknhm51, child number 0
+-------------------------------------
+SELECT /*+ GATHER_PLAN_STATISTICS L5_Q1_AVANT */        
+i.id_inscription, i.date_operation, s.libelle, s.debut, i.nb_places, 
+i.montant, i.statut FROM   inscription i JOIN   session_cours s ON 
+s.id_session = i.id_session WHERE  i.id_etudiant = 2141 ORDER BY 
+i.date_operation
+ 
+Plan hash value: 1742039332
+ 
+------------------------------------------------------------------------------------------------------------------------------------
+| Id  | Operation                     | Name          | Starts | E-Rows | A-Rows |   A-Time   | Buffers |  OMem |  1Mem | Used-Mem |
+------------------------------------------------------------------------------------------------------------------------------------
+|   0 | SELECT STATEMENT              |               |      1 |        |     17 |00:00:00.01 |    2256 |       |       |          |
+|   1 |  SORT ORDER BY                |               |      1 |     16 |     17 |00:00:00.01 |    2256 |  2048 |  2048 | 2048  (0)|
+|   2 |   NESTED LOOPS                |               |      1 |     16 |     17 |00:00:00.02 |    2256 |       |       |          |
+|   3 |    NESTED LOOPS               |               |      1 |     16 |     17 |00:00:00.01 |    2239 |       |       |          |
+|*  4 |     TABLE ACCESS FULL         | INSCRIPTION   |      1 |     16 |     17 |00:00:00.01 |    2220 |       |       |          |
+|*  5 |     INDEX UNIQUE SCAN         | PK_SESSION    |     17 |      1 |     17 |00:00:00.01 |      19 |       |       |          |
+|   6 |    TABLE ACCESS BY INDEX ROWID| SESSION_COURS |     17 |      1 |     17 |00:00:00.01 |      17 |       |       |          |
+------------------------------------------------------------------------------------------------------------------------------------
+ 
+Predicate Information (identified by operation id):
+---------------------------------------------------
+ 
+   4 - filter("I"."ID_ETUDIANT"=2141)
+   5 - access("S"."ID_SESSION"="I"."ID_SESSION")
+ 
+Note
+-----
+   - this is an adaptive plan
+ 
+
+32 lignes sélectionnées. 
+
+SQL> -- Plan avant : TABLE ACCESS FULL sur INSCRIPTION, environ 2 300 blocs lus pour 17 lignes.
+SQL> 
+SQL> -- Optimisation : index sur l'étudiant. La clé étrangère fk_inscription_etudiant n'avait
+SQL> -- pas d'index (choix du L1 : mesurer d'abord). id_session et statut sont ajoutés derrière :
+SQL> -- le même index sert au contrôle RG13 du L4 (étudiant + session + statut) sans lire la table.
+SQL> CREATE INDEX ix_inscription_etudiant ON inscription (id_etudiant, id_session, statut);
+
+Index IX_INSCRIPTION_ETUDIANT créé(e).
+
+SQL> 
+SQL> SELECT /*+ GATHER_PLAN_STATISTICS L5_Q1_APRES */
+  2         i.id_inscription, i.date_operation, s.libelle, s.debut, i.nb_places, i.montant, i.statut
+  3  FROM   inscription i
+  4  JOIN   session_cours s ON s.id_session = i.id_session
+  5  WHERE  i.id_etudiant = 2141
+  6  ORDER BY i.date_operation;
+
+ID_INSCRIPTION DATE_OPE LIBELLE                   DEBUT     NB_PLACES    MONTANT STATUT   
+-------------- -------- ------------------------- -------- ---------- ---------- ---------
+        145558 02/04/25 Session allemand 19988    03/04/25          1        438 CONFIRMEE
+        237334 26/06/25 Session FLE 32547         09/08/25          1        497 CONFIRMEE
+        100513 29/07/25 Session anglais 13769     10/09/25          1        552 CONFIRMEE
+        266372 04/09/25 Session allemand 36531    29/09/25          1        509 CONFIRMEE
+         73963 05/09/25 Session allemand 10124    25/09/25          1        311 CONFIRMEE
+        206490 24/11/25 Session chinois 28322     15/01/26          1        237 ANNULEE  
+         97234 09/01/26 Session espagnol 13325    13/01/26          1        398 ANNULEE  
+         18884 12/01/26 Session allemand 2586     16/01/26          1        203 CONFIRMEE
+        315036 28/01/26 Session chinois 43235     20/02/26          1        210 ANNULEE  
+        171942 02/02/26 Session chinois 23607     09/03/26          1        572 CONFIRMEE
+        205555 25/02/26 Session chinois 28191     31/03/26          1        171 CONFIRMEE
+         20591 26/03/26 Session anglais 2823      03/05/26          1        279 CONFIRMEE
+         40360 27/03/26 Session FLE 5543          13/04/26          1        220 CONFIRMEE
+        246763 10/09/26 Session anglais 33833     18/10/26          1        517 CONFIRMEE
+        111543 26/10/26 Session chinois 15279     17/11/26          1        561 CONFIRMEE
+         73028 23/11/26 Session espagnol 9996     23/12/26          1        530 ANNULEE  
+         16816 18/12/26 Session espagnol 2301     28/12/26          1        461 CONFIRMEE
+
+17 lignes sélectionnées. 
+
+SQL> 
+SQL> SELECT p.plan_table_output
+  2  FROM  (SELECT sql_id, child_number FROM v$sql
+  3         WHERE  sql_text LIKE '%L5_Q1_APRES%' AND sql_text NOT LIKE '%v$sql%'
+  4         ORDER BY last_active_time DESC FETCH FIRST 1 ROW ONLY) q,
+  5         TABLE(DBMS_XPLAN.DISPLAY_CURSOR(q.sql_id, q.child_number, 'ALLSTATS LAST')) p;
+
+PLAN_TABLE_OUTPUT                                                                                                                                               
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+SQL_ID  buup0gtfrd100, child number 0
+-------------------------------------
+SELECT /*+ GATHER_PLAN_STATISTICS L5_Q1_APRES */        
+i.id_inscription, i.date_operation, s.libelle, s.debut, i.nb_places, 
+i.montant, i.statut FROM   inscription i JOIN   session_cours s ON 
+s.id_session = i.id_session WHERE  i.id_etudiant = 2141 ORDER BY 
+i.date_operation
+ 
+Plan hash value: 1621841248
+ 
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+| Id  | Operation                              | Name                    | Starts | E-Rows | A-Rows |   A-Time   | Buffers | Reads  |  OMem |  1Mem | Used-Mem |
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+|   0 | SELECT STATEMENT                       |                         |      1 |        |     17 |00:00:00.01 |      56 |      2 |       |       |          |
+|   1 |  SORT ORDER BY                         |                         |      1 |     16 |     17 |00:00:00.01 |      56 |      2 |  2048 |  2048 | 2048  (0)|
+|   2 |   NESTED LOOPS                         |                         |      1 |     16 |     17 |00:00:00.01 |      56 |      2 |       |       |          |
+|   3 |    NESTED LOOPS                        |                         |      1 |     16 |     17 |00:00:00.01 |      39 |      2 |       |       |          |
+|   4 |     TABLE ACCESS BY INDEX ROWID BATCHED| INSCRIPTION             |      1 |     16 |     17 |00:00:00.01 |      20 |      2 |       |       |          |
+|*  5 |      INDEX RANGE SCAN                  | IX_INSCRIPTION_ETUDIANT |      1 |     16 |     17 |00:00:00.01 |       3 |      2 |       |       |          |
+|*  6 |     INDEX UNIQUE SCAN                  | PK_SESSION              |     17 |      1 |     17 |00:00:00.01 |      19 |      0 |       |       |          |
+|   7 |    TABLE ACCESS BY INDEX ROWID         | SESSION_COURS           |     17 |      1 |     17 |00:00:00.01 |      17 |      0 |       |       |          |
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 
+Predicate Information (identified by operation id):
+---------------------------------------------------
+ 
+   5 - access("I"."ID_ETUDIANT"=2141)
+   6 - access("S"."ID_SESSION"="I"."ID_SESSION")
+ 
+Note
+-----
+   - this is an adaptive plan
+ 
+
+33 lignes sélectionnées. 
+
+SQL> -- Plan après : INDEX RANGE SCAN sur IX_INSCRIPTION_ETUDIANT, puis accès aux 17 lignes.
+SQL> 
+SQL> 
+SQL> -- =====================================================================
+SQL> -- Q2. Places confirmées d'une session (le contrôle de sur-réservation du package L4)
+SQL> -- =====================================================================
+SQL> SELECT /*+ GATHER_PLAN_STATISTICS L5_Q2_AVANT */
+  2         NVL(SUM(nb_places), 0) AS places_confirmees
+  3  FROM   inscription
+  4  WHERE  id_session = 17
+  5  AND    statut = 'CONFIRMEE';
+
+PLACES_CONFIRMEES
+-----------------
+                7
+
+SQL> 
+SQL> SELECT p.plan_table_output
+  2  FROM  (SELECT sql_id, child_number FROM v$sql
+  3         WHERE  sql_text LIKE '%L5_Q2_AVANT%' AND sql_text NOT LIKE '%v$sql%'
+  4         ORDER BY last_active_time DESC FETCH FIRST 1 ROW ONLY) q,
+  5         TABLE(DBMS_XPLAN.DISPLAY_CURSOR(q.sql_id, q.child_number, 'ALLSTATS LAST')) p;
+
+PLAN_TABLE_OUTPUT                                                                                                                                               
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+SQL_ID  0xcmdx3smz4mb, child number 0
+-------------------------------------
+SELECT /*+ GATHER_PLAN_STATISTICS L5_Q2_AVANT */        
+NVL(SUM(nb_places), 0) AS places_confirmees FROM   inscription WHERE  
+id_session = 17 AND    statut = 'CONFIRMEE'
+ 
+Plan hash value: 1717816087
+ 
+--------------------------------------------------------------------------------------------
+| Id  | Operation          | Name        | Starts | E-Rows | A-Rows |   A-Time   | Buffers |
+--------------------------------------------------------------------------------------------
+|   0 | SELECT STATEMENT   |             |      1 |        |      1 |00:00:00.01 |    2220 |
+|   1 |  SORT AGGREGATE    |             |      1 |      1 |      1 |00:00:00.01 |    2220 |
+|*  2 |   TABLE ACCESS FULL| INSCRIPTION |      1 |      7 |      7 |00:00:00.01 |    2220 |
+--------------------------------------------------------------------------------------------
+ 
+Predicate Information (identified by operation id):
+---------------------------------------------------
+ 
+   2 - filter(("ID_SESSION"=17 AND "STATUT"='CONFIRMEE'))
+ 
+
+21 lignes sélectionnées. 
+
+SQL> -- Plan avant : TABLE ACCESS FULL, environ 2 300 blocs lus pour une poignée de lignes.
+SQL> 
+SQL> -- Optimisation : index « couvrant ». Il contient toutes les colonnes dont la requête a
+SQL> -- besoin (session, statut, places) : Oracle répond avec l'index seul, sans lire la table.
+SQL> -- Il sert aussi d'index à la clé étrangère fk_inscription_session.
+SQL> CREATE INDEX ix_inscription_session ON inscription (id_session, statut, nb_places);
+
+Index IX_INSCRIPTION_SESSION créé(e).
+
+SQL> 
+SQL> SELECT /*+ GATHER_PLAN_STATISTICS L5_Q2_APRES */
+  2         NVL(SUM(nb_places), 0) AS places_confirmees
+  3  FROM   inscription
+  4  WHERE  id_session = 17
+  5  AND    statut = 'CONFIRMEE';
+
+PLACES_CONFIRMEES
+-----------------
+                7
+
+SQL> 
+SQL> SELECT p.plan_table_output
+  2  FROM  (SELECT sql_id, child_number FROM v$sql
+  3         WHERE  sql_text LIKE '%L5_Q2_APRES%' AND sql_text NOT LIKE '%v$sql%'
+  4         ORDER BY last_active_time DESC FETCH FIRST 1 ROW ONLY) q,
+  5         TABLE(DBMS_XPLAN.DISPLAY_CURSOR(q.sql_id, q.child_number, 'ALLSTATS LAST')) p;
+
+PLAN_TABLE_OUTPUT                                                                                                                                               
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+SQL_ID  3jwdkqymtfhc0, child number 0
+-------------------------------------
+SELECT /*+ GATHER_PLAN_STATISTICS L5_Q2_APRES */        
+NVL(SUM(nb_places), 0) AS places_confirmees FROM   inscription WHERE  
+id_session = 17 AND    statut = 'CONFIRMEE'
+ 
+Plan hash value: 1620829197
+ 
+---------------------------------------------------------------------------------------------------------------
+| Id  | Operation         | Name                   | Starts | E-Rows | A-Rows |   A-Time   | Buffers | Reads  |
+---------------------------------------------------------------------------------------------------------------
+|   0 | SELECT STATEMENT  |                        |      1 |        |      1 |00:00:00.01 |       3 |      2 |
+|   1 |  SORT AGGREGATE   |                        |      1 |      1 |      1 |00:00:00.01 |       3 |      2 |
+|*  2 |   INDEX RANGE SCAN| IX_INSCRIPTION_SESSION |      1 |      7 |      7 |00:00:00.01 |       3 |      2 |
+---------------------------------------------------------------------------------------------------------------
+ 
+Predicate Information (identified by operation id):
+---------------------------------------------------
+ 
+   2 - access("ID_SESSION"=17 AND "STATUT"='CONFIRMEE')
+ 
+
+21 lignes sélectionnées. 
+
+SQL> -- Plan après : INDEX RANGE SCAN sur IX_INSCRIPTION_SESSION, aucun accès à la table.
+SQL> 
+SQL> 
+SQL> -- =====================================================================
+SQL> -- Q3. Tableau de bord de la direction : places et CA confirmés par site et par langue
+SQL> --     Il lit forcément toutes les inscriptions confirmées : un index n'y peut rien.
+SQL> --     On calcule le résultat à l'avance dans une vue matérialisée.
+SQL> -- =====================================================================
+SQL> SELECT /*+ GATHER_PLAN_STATISTICS L5_Q3_AVANT */
+  2         i.id_site, c.libelle AS langue, SUM(i.nb_places) AS places, SUM(i.montant) AS ca
+  3  FROM   inscription i
+  4  JOIN   session_cours s ON s.id_session = i.id_session
+  5  JOIN   categorie c     ON c.id_categorie = s.id_categorie
+  6  WHERE  i.statut = 'CONFIRMEE'
+  7  GROUP BY i.id_site, c.libelle
+  8  ORDER BY i.id_site, c.libelle;
+
+   ID_SITE LANGUE         PLACES         CA
+---------- ---------- ---------- ----------
+         2 allemand        11789    4440243
+         2 anglais         11960    4539657
+         2 chinois         12272    4685034
+         2 espagnol        11922    4449117
+         2 FLE             12132    4544029
+         2 italien         12520    4675112
+         3 allemand        24253    9021799
+         3 anglais         24830    9262553
+         3 chinois         25223    9367871
+         3 espagnol        25557    9639682
+         3 FLE             25662    9653563
+         3 italien         24133    9135514
+         4 allemand        16663    6274948
+         4 anglais         18080    6823296
+         4 chinois         17186    6474794
+         4 espagnol        17100    6390552
+         4 FLE             17310    6420989
+         4 italien         17877    6698366
+
+18 lignes sélectionnées. 
+
+SQL> 
+SQL> SELECT p.plan_table_output
+  2  FROM  (SELECT sql_id, child_number FROM v$sql
+  3         WHERE  sql_text LIKE '%L5_Q3_AVANT%' AND sql_text NOT LIKE '%v$sql%'
+  4         ORDER BY last_active_time DESC FETCH FIRST 1 ROW ONLY) q,
+  5         TABLE(DBMS_XPLAN.DISPLAY_CURSOR(q.sql_id, q.child_number, 'ALLSTATS LAST')) p;
+
+PLAN_TABLE_OUTPUT                                                                                                                                               
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+SQL_ID  6ywz92mwt93vp, child number 0
+-------------------------------------
+SELECT /*+ GATHER_PLAN_STATISTICS L5_Q3_AVANT */        i.id_site, 
+c.libelle AS langue, SUM(i.nb_places) AS places, SUM(i.montant) AS ca 
+FROM   inscription i JOIN   session_cours s ON s.id_session = 
+i.id_session JOIN   categorie c     ON c.id_categorie = s.id_categorie 
+WHERE  i.statut = 'CONFIRMEE' GROUP BY i.id_site, c.libelle ORDER BY 
+i.id_site, c.libelle
+ 
+Plan hash value: 1422627605
+ 
+------------------------------------------------------------------------------------------------------------------------------
+| Id  | Operation               | Name          | Starts | E-Rows | A-Rows |   A-Time   | Buffers |  OMem |  1Mem | Used-Mem |
+------------------------------------------------------------------------------------------------------------------------------
+|   0 | SELECT STATEMENT        |               |      1 |        |     18 |00:00:00.05 |    2590 |       |       |          |
+|   1 |  SORT ORDER BY          |               |      1 |     13 |     18 |00:00:00.05 |    2590 |  4096 |  4096 | 4096  (0)|
+|   2 |   HASH GROUP BY         |               |      1 |     13 |     18 |00:00:00.05 |    2590 |   983K|   983K|          |
+|*  3 |    HASH JOIN            |               |      1 |     13 |     18 |00:00:00.05 |    2590 |  1797K|  1797K| 1200K (0)|
+|   4 |     TABLE ACCESS FULL   | CATEGORIE     |      1 |      6 |      6 |00:00:00.01 |       2 |       |       |          |
+|   5 |     VIEW                | VW_GBC_10     |      1 |     13 |     18 |00:00:00.05 |    2588 |       |       |          |
+|   6 |      HASH GROUP BY      |               |      1 |     13 |     18 |00:00:00.05 |    2588 |  1041K|  1041K|          |
+|*  7 |       HASH JOIN         |               |      1 |    323K|    326K|00:00:00.03 |    2588 |  3987K|  2659K| 3852K (0)|
+|   8 |        TABLE ACCESS FULL| SESSION_COURS |      1 |  47619 |  47619 |00:00:00.01 |     368 |       |       |          |
+|*  9 |        TABLE ACCESS FULL| INSCRIPTION   |      1 |    326K|    326K|00:00:00.01 |    2220 |       |       |          |
+------------------------------------------------------------------------------------------------------------------------------
+ 
+Predicate Information (identified by operation id):
+---------------------------------------------------
+ 
+   3 - access("C"."ID_CATEGORIE"="ITEM_1")
+   7 - access("S"."ID_SESSION"="I"."ID_SESSION")
+   9 - filter("I"."STATUT"='CONFIRMEE')
+ 
+
+33 lignes sélectionnées. 
+
+SQL> -- Plan avant : 2 jointures par hachage et lecture complète d'INSCRIPTION et SESSION_COURS.
+SQL> 
+SQL> -- Optimisation : vue matérialisée par site, langue et MOIS de la session.
+SQL> --   - Le mois permet d'autres tableaux (évolution mensuelle, rentrée de septembre) à
+SQL> --     partir de la même vue : 3 sites x 6 langues x 24 mois, quelques centaines de lignes.
+SQL> --   - ENABLE QUERY REWRITE : Oracle réécrit tout seul la requête Q3 (inchangée) pour lire
+SQL> --     la vue au lieu des tables. Les programmes existants n'ont rien à changer.
+SQL> --   - REFRESH COMPLETE ON DEMAND : recalculée à la demande (par exemple chaque nuit,
+SQL> --     DBMS_MVIEW.REFRESH('MV_ACTIVITE_MENSUELLE')). Un tableau de bord tolère des chiffres
+SQL> --     de la veille. Tant qu'elle n'est pas recalculée après une nouvelle inscription, Oracle
+SQL> --     ne l'utilise plus pour réécrire (query_rewrite_integrity = enforced) : la requête
+SQL> --     repasse sur les tables, plus lente mais jamais fausse.
+SQL> CREATE MATERIALIZED VIEW mv_activite_mensuelle
+  2  BUILD IMMEDIATE
+  3  REFRESH COMPLETE ON DEMAND
+  4  ENABLE QUERY REWRITE
+  5  AS
+  6  SELECT i.id_site,
+  7         c.libelle                AS langue,
+  8         TRUNC(s.debut, 'MM')     AS mois,
+  9         COUNT(*)                 AS nb_inscriptions,
+ 10         SUM(i.nb_places)         AS places,
+ 11         SUM(i.montant)           AS ca
+ 12  FROM   inscription i
+ 13  JOIN   session_cours s ON s.id_session = i.id_session
+ 14  JOIN   categorie c     ON c.id_categorie = s.id_categorie
+ 15  WHERE  i.statut = 'CONFIRMEE'
+ 16  GROUP BY i.id_site, c.libelle, TRUNC(s.debut, 'MM');
+
+Materialized view MV_ACTIVITE_MENSUELLE créé(e).
+
+SQL> 
+SQL> COMMENT ON MATERIALIZED VIEW mv_activite_mensuelle IS 'L5 : places et CA confirmés par site, langue et mois. Recalcul : DBMS_MVIEW.REFRESH.';
+
+Comment créé(e).
+
+SQL> 
+SQL> EXEC DBMS_STATS.GATHER_TABLE_STATS(USER, 'MV_ACTIVITE_MENSUELLE')
+
+Procédure PL/SQL terminée.
+
+SQL> 
+SQL> SELECT /*+ GATHER_PLAN_STATISTICS L5_Q3_APRES */
+  2         i.id_site, c.libelle AS langue, SUM(i.nb_places) AS places, SUM(i.montant) AS ca
+  3  FROM   inscription i
+  4  JOIN   session_cours s ON s.id_session = i.id_session
+  5  JOIN   categorie c     ON c.id_categorie = s.id_categorie
+  6  WHERE  i.statut = 'CONFIRMEE'
+  7  GROUP BY i.id_site, c.libelle
+  8  ORDER BY i.id_site, c.libelle;
+
+   ID_SITE LANGUE         PLACES         CA
+---------- ---------- ---------- ----------
+         2 allemand        11789    4440243
+         2 anglais         11960    4539657
+         2 chinois         12272    4685034
+         2 espagnol        11922    4449117
+         2 FLE             12132    4544029
+         2 italien         12520    4675112
+         3 allemand        24253    9021799
+         3 anglais         24830    9262553
+         3 chinois         25223    9367871
+         3 espagnol        25557    9639682
+         3 FLE             25662    9653563
+         3 italien         24133    9135514
+         4 allemand        16663    6274948
+         4 anglais         18080    6823296
+         4 chinois         17186    6474794
+         4 espagnol        17100    6390552
+         4 FLE             17310    6420989
+         4 italien         17877    6698366
+
+18 lignes sélectionnées. 
+
+SQL> 
+SQL> SELECT p.plan_table_output
+  2  FROM  (SELECT sql_id, child_number FROM v$sql
+  3         WHERE  sql_text LIKE '%L5_Q3_APRES%' AND sql_text NOT LIKE '%v$sql%'
+  4         ORDER BY last_active_time DESC FETCH FIRST 1 ROW ONLY) q,
+  5         TABLE(DBMS_XPLAN.DISPLAY_CURSOR(q.sql_id, q.child_number, 'ALLSTATS LAST')) p;
+
+PLAN_TABLE_OUTPUT                                                                                                                                               
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+SQL_ID  dq1kqafkrvgt8, child number 0
+-------------------------------------
+SELECT /*+ GATHER_PLAN_STATISTICS L5_Q3_APRES */        i.id_site, 
+c.libelle AS langue, SUM(i.nb_places) AS places, SUM(i.montant) AS ca 
+FROM   inscription i JOIN   session_cours s ON s.id_session = 
+i.id_session JOIN   categorie c     ON c.id_categorie = s.id_categorie 
+WHERE  i.statut = 'CONFIRMEE' GROUP BY i.id_site, c.libelle ORDER BY 
+i.id_site, c.libelle
+ 
+Plan hash value: 4238872675
+ 
+---------------------------------------------------------------------------------------------------------------------------------------------
+| Id  | Operation                      | Name                  | Starts | E-Rows | A-Rows |   A-Time   | Buffers |  OMem |  1Mem | Used-Mem |
+---------------------------------------------------------------------------------------------------------------------------------------------
+|   0 | SELECT STATEMENT               |                       |      1 |        |     18 |00:00:00.01 |       4 |       |       |          |
+|   1 |  SORT ORDER BY                 |                       |      1 |     13 |     18 |00:00:00.01 |       4 |  4096 |  4096 | 4096  (0)|
+|   2 |   HASH GROUP BY                |                       |      1 |     13 |     18 |00:00:00.01 |       4 |  1161K|  1161K|          |
+|   3 |    MAT_VIEW REWRITE ACCESS FULL| MV_ACTIVITE_MENSUELLE |      1 |    432 |    432 |00:00:00.01 |       4 |       |       |          |
+---------------------------------------------------------------------------------------------------------------------------------------------
+ 
+
+20 lignes sélectionnées. 
+
+SQL> -- Plan après : MAT_VIEW REWRITE ACCESS FULL sur MV_ACTIVITE_MENSUELLE : la requête n'a
+SQL> -- pas changé, Oracle lit la vue matérialisée. Même résultat qu'avant (C5 et C9 par site).
+SQL> 
+SQL> 
+SQL> -- =====================================================================
+SQL> -- Bilan : blocs lus avant / après
+SQL> -- Pour chaque requête, on lit dans V$SQL_PLAN_STATISTICS_ALL la première étape du plan
+SQL> -- (id = 1) : ses Buffers comptent les blocs lus par tout le plan.
+SQL> -- Si la base a été reconstruite plusieurs fois, V$SQL peut garder d'anciennes versions
+SQL> -- de la requête : on prend la plus récente (last_active_time).
+SQL> -- =====================================================================
+SQL> INSERT INTO l5_mesure (requete, version, optimisation, blocs_lus, lignes)
+  2  SELECT SUBSTR(m.repere, 4, 2),
+  3         SUBSTR(m.repere, 7),
+  4         CASE SUBSTR(m.repere, 4, 2)
+  5              WHEN 'Q1' THEN 'index ix_inscription_etudiant'
+  6              WHEN 'Q2' THEN 'index couvrant ix_inscription_session'
+  7              WHEN 'Q3' THEN 'vue matérialisée mv_activite_mensuelle'
+  8         END,
+  9         st.last_cr_buffer_gets + st.last_cu_buffer_gets,
+ 10         st.last_output_rows
+ 11  FROM  (SELECT 'L5_Q1_AVANT' AS repere FROM dual UNION ALL SELECT 'L5_Q1_APRES' FROM dual
+ 12         UNION ALL SELECT 'L5_Q2_AVANT' FROM dual UNION ALL SELECT 'L5_Q2_APRES' FROM dual
+ 13         UNION ALL SELECT 'L5_Q3_AVANT' FROM dual UNION ALL SELECT 'L5_Q3_APRES' FROM dual) m
+ 14  CROSS APPLY (SELECT sql_id, child_number FROM v$sql
+ 15               WHERE  sql_text LIKE '%' || m.repere || '%' AND sql_text NOT LIKE '%v$sql%'
+ 16               ORDER BY last_active_time DESC FETCH FIRST 1 ROW ONLY) q
+ 17  JOIN   v$sql_plan_statistics_all st ON st.sql_id = q.sql_id
+ 18                                     AND st.child_number = q.child_number
+ 19                                     AND st.id = 1;
+
+6 lignes inséré.
+
+SQL> COMMIT;
+Validation terminée.
+SQL> 
+SQL> COLUMN requete      FORMAT A7
+SQL> COLUMN optimisation FORMAT A40
+SQL> SELECT a.requete, a.optimisation,
+  2         a.blocs_lus AS blocs_avant, p.blocs_lus AS blocs_apres,
+  3         ROUND(a.blocs_lus / NULLIF(p.blocs_lus, 0)) AS divise_par
+  4  FROM   l5_mesure a
+  5  JOIN   l5_mesure p ON p.requete = a.requete AND p.version = 'APRES'
+  6  WHERE  a.version = 'AVANT'
+  7  ORDER BY a.requete;
+
+REQUETE OPTIMISATION                             BLOCS_AVANT BLOCS_APRES DIVISE_PAR
+------- ---------------------------------------- ----------- ----------- ----------
+Q1      index ix_inscription_etudiant                   2256          56         40
+Q2      index couvrant ix_inscription_session           2220           3        740
+Q3      vue matérialisée mv_activite_mensuelle          2590           4        648
+
+SQL> -- Résultat : voir preuves/L5_performance.txt et docs/comptes_rendus/05_L5_performance_securite.md
+SQL> @@09_securite.sql
+SQL> -- =====================================================================
+SQL> -- 09_securite.sql
+SQL> -- Livrable : L5 · Sécurité
+SQL> -- Responsable : Baptiste (avec Claude Code)
+SQL> -- Attendu  : rôle, vue de restriction sans données perso inutiles, VPD/masquage/audit unifié + preuve par compte
+SQL> -- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+SQL> --
+SQL> -- Qui voit quoi :
+SQL> --   compte          rôle              vue                 lignes vues              données personnelles
+SQL> --   agent_bordeaux  role_agent_site   v_inscrits_site     site de Bordeaux (2)     nom, prénom, téléphone
+SQL> --   agent_tours     role_agent_site   v_inscrits_site     site de Tours (3)        nom, prénom, téléphone
+SQL> --   direction       role_direction    v_activite_site     les 3 sites              aucune
+SQL> --   langues         (propriétaire)    tout                tout                     tout
+SQL> --   Personne d'autre que langues ne lit les tables : ni e-mail, ni ville, ni date de
+SQL> --   création du compte, ni parrain ne sortent du schéma.
+SQL> --
+SQL> -- Mécanisme : sécurité par ligne (VPD, package DBMS_RLS). Oracle ajoute tout seul une
+SQL> -- condition « id_site = ... » à chaque requête qui touche INSCRIPTION ou SESSION_COURS,
+SQL> -- selon le compte connecté. La même vue v_inscrits_site montre donc des lignes différentes
+SQL> -- à agent_bordeaux et à agent_tours.
+SQL> --
+SQL> -- Prérequis (installation_system.sql, en system) : CREATE ROLE, DB_DEVELOPER_ROLE
+SQL> -- (pour DBMS_RLS), et les comptes agent_bordeaux, agent_tours, direction.
+SQL> -- Preuve de ce que voit chaque compte : preuves/L5_securite.sql et .txt
+SQL> -- =====================================================================
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 1. Quel compte travaille pour quel site
+SQL> --    id_site vide = tous les sites (la direction). Un compte absent de la table ne voit rien.
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE TABLE compte_site (
+  2      nom_compte  VARCHAR2(128 CHAR) CONSTRAINT nn_compte_site_nom NOT NULL,
+  3      id_site     NUMBER(4),
+  4      CONSTRAINT pk_compte_site      PRIMARY KEY (nom_compte),
+  5      CONSTRAINT fk_compte_site_site FOREIGN KEY (id_site) REFERENCES site (id_campus),
+  6      CONSTRAINT ck_compte_site_nom  CHECK (nom_compte = UPPER(nom_compte))
+  7  );
+
+Table COMPTE_SITE créé(e).
+
+SQL> 
+SQL> COMMENT ON TABLE compte_site IS 'L5 : site de rattachement de chaque compte Oracle, lu par la politique VPD. id_site vide = tous les sites.';
+
+Comment créé(e).
+
+SQL> 
+SQL> INSERT INTO compte_site (nom_compte, id_site) VALUES ('AGENT_BORDEAUX', 2);
+
+1 ligne inséré.
+
+SQL> INSERT INTO compte_site (nom_compte, id_site) VALUES ('AGENT_TOURS',    3);
+
+1 ligne inséré.
+
+SQL> INSERT INTO compte_site (nom_compte, id_site) VALUES ('DIRECTION',      NULL);
+
+1 ligne inséré.
+
+SQL> COMMIT;
+Validation terminée.
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 2. Les vues de restriction
+SQL> -- ---------------------------------------------------------------------
+SQL> 
+SQL> -- Agent d'accueil : la liste des inscrits aux sessions de son site. Il a besoin du nom
+SQL> -- pour accueillir l'étudiant et du téléphone pour le prévenir d'un changement. Il n'a
+SQL> -- pas besoin de l'e-mail, de la ville, de la date de création du compte, du parrain ni
+SQL> -- du montant payé : ils ne sont pas dans la vue (minimisation, RGPD).
+SQL> CREATE OR REPLACE VIEW v_inscrits_site AS
+  2  SELECT s.id_campus     AS id_site,
+  3         s.id_session,
+  4         s.libelle       AS session_libelle,
+  5         s.debut,
+  6         i.id_inscription,
+  7         e.nom,
+  8         e.prenom,
+  9         e.telephone,
+ 10         i.nb_places,
+ 11         i.statut
+ 12  FROM   inscription   i
+ 13  JOIN   session_cours s ON s.id_session  = i.id_session
+ 14  JOIN   etudiant      e ON e.id_etudiant = i.id_etudiant;
+
+View V_INSCRITS_SITE créé(e).
+
+SQL> 
+SQL> -- Direction : l'activité de tous les sites, sans aucune donnée personnelle. Pas même
+SQL> -- l'id de l'étudiant : un identifiant qui permet de suivre une personne reste une donnée
+SQL> -- personnelle, et la direction n'en a pas besoin pour ses chiffres.
+SQL> CREATE OR REPLACE VIEW v_activite_site AS
+  2  SELECT i.id_site,
+  3         c.ville                 AS ville_site,
+  4         cat.libelle             AS langue,
+  5         i.id_session,
+  6         TRUNC(s.debut, 'MM')    AS mois_session,
+  7         TRUNC(i.date_operation) AS jour_operation,
+  8         i.nb_places,
+  9         i.montant,
+ 10         i.statut,
+ 11         CASE WHEN i.id_groupe IS NULL THEN 'N' ELSE 'O' END AS dans_un_parcours
+ 12  FROM   inscription   i
+ 13  JOIN   session_cours s   ON s.id_session    = i.id_session
+ 14  JOIN   categorie     cat ON cat.id_categorie = s.id_categorie
+ 15  JOIN   campus        c   ON c.id_campus     = i.id_site;
+
+View V_ACTIVITE_SITE créé(e).
+
+SQL> 
+SQL> COMMENT ON TABLE v_inscrits_site IS 'L5 : vue des agents d''accueil (role_agent_site), filtrée par site par la politique VPD.';
+
+Comment créé(e).
+
+SQL> COMMENT ON TABLE v_activite_site IS 'L5 : vue de la direction (role_direction), sans donnée personnelle.';
+
+Comment créé(e).
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 3. Les rôles
+SQL> --    Les rôles ne sont pas supprimés par 00_nettoyage.sql (ce ne sont pas des objets du
+SQL> --    schéma) : on les supprime ici s'ils existent, pour pouvoir relancer run_all.
+SQL> --    Les droits vont aux rôles, et les rôles aux comptes : pour un nouvel agent, il suffit
+SQL> --    de lui donner le rôle et d'ajouter une ligne dans COMPTE_SITE.
+SQL> -- ---------------------------------------------------------------------
+SQL> BEGIN
+  2      -- le créateur d'un rôle le reçoit automatiquement : il apparaît dans USER_ROLE_PRIVS
+  3      FOR r IN (SELECT granted_role FROM user_role_privs
+  4                WHERE  granted_role IN ('ROLE_AGENT_SITE', 'ROLE_DIRECTION')) LOOP
+  5          EXECUTE IMMEDIATE 'DROP ROLE ' || r.granted_role;
+  6      END LOOP;
+  7  END;
+  8  /
+
+Procédure PL/SQL terminée.
+
+SQL> 
+SQL> CREATE ROLE role_agent_site;
+
+Role ROLE_AGENT_SITE créé(e).
+
+SQL> CREATE ROLE role_direction;
+
+Role ROLE_DIRECTION créé(e).
+
+SQL> 
+SQL> GRANT SELECT ON v_inscrits_site TO role_agent_site;
+
+Succès de l'élément Grant.
+
+SQL> GRANT SELECT ON v_activite_site TO role_direction;
+
+Succès de l'élément Grant.
+
+SQL> 
+SQL> GRANT role_agent_site TO agent_bordeaux, agent_tours;
+
+Succès de l'élément Grant.
+
+SQL> GRANT role_direction  TO direction;
+
+Succès de l'élément Grant.
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 4. Sécurité par ligne (VPD)
+SQL> --    La fonction renvoie la condition qu'Oracle ajoute aux requêtes du compte connecté :
+SQL> --      - langues (propriétaire) : aucune condition. Indispensable : les triggers et le
+SQL> --        package du L4, la vue matérialisée du L5 tournent sous ce compte ;
+SQL> --      - compte rattaché à un site : id_site = ce site ;
+SQL> --      - compte « tous les sites » (direction) : aucune condition ;
+SQL> --      - tout autre compte : 1 = 0, il ne voit rien (refus par défaut).
+SQL> --    La politique est posée sur les TABLES, pas sur les vues : elle s'applique quel que
+SQL> --    soit le chemin (vue, jointure, sous-requête).
+SQL> --    Pas de politique sur ETUDIANT : un étudiant de Bordeaux peut suivre un cours à Tours
+SQL> --    (12 356 personnes ont des opérations sur au moins deux sites, C6). L'agent de Tours
+SQL> --    doit le voir dans la liste de SA session. Il ne voit les étudiants qu'à travers
+SQL> --    v_inscrits_site, donc seulement ceux inscrits dans son site.
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE OR REPLACE FUNCTION fn_vpd_site (p_schema IN VARCHAR2, p_objet IN VARCHAR2)
+  2  RETURN VARCHAR2
+  3  IS
+  4      v_compte  VARCHAR2(128) := SYS_CONTEXT('USERENV', 'SESSION_USER');
+  5      v_trouve  NUMBER;
+  6      v_site    compte_site.id_site%TYPE;
+  7      v_colonne VARCHAR2(30);
+  8  BEGIN
+  9      IF v_compte = p_schema THEN
+ 10          RETURN NULL;
+ 11      END IF;
+ 12  
+ 13      SELECT COUNT(*), MAX(id_site) INTO v_trouve, v_site
+ 14      FROM   compte_site
+ 15      WHERE  nom_compte = v_compte;
+ 16  
+ 17      IF v_trouve = 0 THEN
+ 18          RETURN '1 = 0';
+ 19      ELSIF v_site IS NULL THEN
+ 20          RETURN NULL;
+ 21      END IF;
+ 22  
+ 23      -- le site s'appelle id_site dans INSCRIPTION, id_campus dans SESSION_COURS
+ 24      v_colonne := CASE p_objet WHEN 'INSCRIPTION' THEN 'id_site' ELSE 'id_campus' END;
+ 25      RETURN v_colonne || ' = ' || v_site;
+ 26  END fn_vpd_site;
+ 27  /
+
+Elément Function FN_VPD_SITE compilé
+
+SQL> 
+SQL> BEGIN
+  2      DBMS_RLS.ADD_POLICY(
+  3          object_schema   => USER,
+  4          object_name     => 'INSCRIPTION',
+  5          policy_name     => 'POL_INSCRIPTION_SITE',
+  6          function_schema => USER,
+  7          policy_function => 'FN_VPD_SITE',
+  8          statement_types => 'SELECT, INSERT, UPDATE, DELETE',
+  9          update_check    => TRUE);          -- interdit aussi d'écrire une ligne d'un autre site
+ 10  
+ 11      DBMS_RLS.ADD_POLICY(
+ 12          object_schema   => USER,
+ 13          object_name     => 'SESSION_COURS',
+ 14          policy_name     => 'POL_SESSION_SITE',
+ 15          function_schema => USER,
+ 16          policy_function => 'FN_VPD_SITE',
+ 17          statement_types => 'SELECT, INSERT, UPDATE, DELETE',
+ 18          update_check    => TRUE);
+ 19  END;
+ 20  /
+
+Procédure PL/SQL terminée.
+
+SQL> 
+SQL> 
+SQL> -- Contrôle : les rôles, leurs droits et les politiques en place
+SQL> COLUMN grantee      FORMAT A16
+SQL> COLUMN table_name   FORMAT A16
+SQL> COLUMN privilege    FORMAT A10
+SQL> COLUMN object_name  FORMAT A14
+SQL> COLUMN policy_name  FORMAT A21
+SQL> COLUMN function     FORMAT A12
+SQL> SELECT grantee, table_name, privilege
+  2  FROM   user_tab_privs_made
+  3  WHERE  grantee IN ('ROLE_AGENT_SITE', 'ROLE_DIRECTION')
+  4  ORDER BY grantee;
+
+GRANTEE          TABLE_NAME       PRIVILEGE 
+---------------- ---------------- ----------
+ROLE_AGENT_SITE  V_INSCRITS_SITE  SELECT    
+ROLE_DIRECTION   V_ACTIVITE_SITE  SELECT    
+
+SQL> 
+SQL> SELECT object_name, policy_name, function, sel, ins, upd, del, enable
+  2  FROM   user_policies
+  3  ORDER BY object_name;
+
+OBJECT_NAME    POLICY_NAME           FUNCTION     SEL INS UPD DEL ENA
+-------------- --------------------- ------------ --- --- --- --- ---
+INSCRIPTION    POL_INSCRIPTION_SITE  FN_VPD_SITE  YES YES YES YES YES
+SESSION_COURS  POL_SESSION_SITE      FN_VPD_SITE  YES YES YES YES YES
+
+SQL> -- Résultat attendu : 2 droits SELECT (un par rôle), 2 politiques actives
+SQL> @@10_distribution.sql
+SQL> -- =====================================================================
+SQL> -- 10_distribution.sql
+SQL> -- Livrable : L6 · Distribution
+SQL> -- Responsable : Baptiste (avec Claude Code)
+SQL> -- Attendu  : fragmentation par site (schémas, db links, vues globales)
+SQL> -- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+SQL> --
+SQL> -- Prérequis : installation_system.sql relancé en system (comptes site_bordeaux,
+SQL> -- site_tours, site_angers, créés pour le L6).
+SQL> --
+SQL> -- Architecture (explications : docs/L6_distribution/L6_distribution.md) :
+SQL> --   - langues = le SIÈGE. Il garde le catalogue de répartition, les liens vers les
+SQL> --     sites, les vues globales et les procédures réparties.
+SQL> --   - site_bordeaux, site_tours, site_angers = la base locale de chaque SITE. Dans la
+SQL> --     réalité, trois serveurs ; ici trois schémas de la même base (le kit n'a qu'une
+SQL> --     instance Oracle). Seule la chaîne USING des liens changerait sur trois serveurs.
+SQL> --
+SQL> -- Schéma de répartition :
+SQL> --   SESSION_COURS  fragmentation horizontale primaire : id_campus = site
+SQL> --   INSCRIPTION    fragmentation horizontale DÉRIVÉE de SESSION_COURS (une inscription
+SQL> --                  suit sa session), écrite simplement grâce à id_site, la colonne
+SQL> --                  dénormalisée du L3 : la clé étrangère inscription -> session reste
+SQL> --                  locale au site
+SQL> --   ETUDIANT       fragmentation horizontale sur id_campus (site de rattachement) :
+SQL> --                  une seule copie des données personnelles, dans le site qui suit l'étudiant
+SQL> --   CATEGORIE      répliquée dans chaque site (6 lignes, ne change pas) : la clé
+SQL> --                  étrangère session -> catégorie reste locale
+SQL> --   CAMPUS, SIEGE, SITE : restent au siège (référentiel de l'organisation)
+SQL> --   SESSION_REPLIQUE : copie redondante, au siège, des sessions d'Angers (partie 4 bis).
+SQL> --                  Elle sert de secours quand Angers est en panne (bascule), et les
+SQL> --                  conflits entre la copie et le site sont réglés par « le dernier
+SQL> --                  écrivain gagne » (colonne derniere_maj), comme au Lab 5.
+SQL> --
+SQL> -- Les tables centrales de langues (L1 à L5) sont gardées : elles servent de référence
+SQL> -- pour prouver que la fragmentation est complète, disjointe et reconstructible, et les
+SQL> -- scripts des livrables précédents en ont besoin. Les nouvelles opérations réparties
+SQL> -- (pkg_reparti) n'écrivent que dans les fragments.
+SQL> --
+SQL> -- Codes d'erreur pris par le L6 : -20020 à -20026.
+SQL> -- Panne et reprise d'un site : sql/L6_panne_reprise.sql (à lancer à la main).
+SQL> -- =====================================================================
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 1. Catalogue de répartition (au siège)
+SQL> --    Le siège sait où est chaque fragment : c'est ce que lisent les procédures réparties,
+SQL> --    qui choisissent leur lien à l'exécution. Ajouter un site = une ligne de plus ici.
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE TABLE catalogue_site (
+  2      id_site    NUMBER(4)          CONSTRAINT nn_catsite_id     NOT NULL,
+  3      ville      VARCHAR2(60 CHAR)  CONSTRAINT nn_catsite_ville  NOT NULL,
+  4      compte     VARCHAR2(30 CHAR)  CONSTRAINT nn_catsite_compte NOT NULL,
+  5      nom_lien   VARCHAR2(30 CHAR)  CONSTRAINT nn_catsite_lien   NOT NULL,
+  6      CONSTRAINT pk_catalogue_site  PRIMARY KEY (id_site),
+  7      CONSTRAINT fk_catsite_site    FOREIGN KEY (id_site) REFERENCES site (id_campus),
+  8      CONSTRAINT uq_catsite_lien    UNIQUE (nom_lien)
+  9  );
+
+Table CATALOGUE_SITE créé(e).
+
+SQL> 
+SQL> INSERT INTO catalogue_site VALUES (2, 'Bordeaux', 'SITE_BORDEAUX', 'LIEN_BORDEAUX');
+
+1 ligne inséré.
+
+SQL> INSERT INTO catalogue_site VALUES (3, 'Tours',    'SITE_TOURS',    'LIEN_TOURS');
+
+1 ligne inséré.
+
+SQL> INSERT INTO catalogue_site VALUES (4, 'Angers',   'SITE_ANGERS',   'LIEN_ANGERS');
+
+1 ligne inséré.
+
+SQL> COMMIT;
+Validation terminée.
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 2. Liens de base de données, du siège vers chaque site
+SQL> --    Sur trois serveurs, seule la chaîne USING changerait (hôte du site).
+SQL> --    00_nettoyage.sql supprime les liens (type DATABASE LINK) au début de run_all.
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE DATABASE LINK lien_bordeaux CONNECT TO site_bordeaux IDENTIFIED BY "site_bordeaux"
+  2      USING '//localhost:1521/FREEPDB1';
+
+Database link LIEN_BORDEAUX créé(e).
+
+SQL> CREATE DATABASE LINK lien_tours    CONNECT TO site_tours    IDENTIFIED BY "site_tours"
+  2      USING '//localhost:1521/FREEPDB1';
+
+Database link LIEN_TOURS créé(e).
+
+SQL> CREATE DATABASE LINK lien_angers   CONNECT TO site_angers   IDENTIFIED BY "site_angers"
+  2      USING '//localhost:1521/FREEPDB1';
+
+Database link LIEN_ANGERS créé(e).
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 3. Création des fragments, à distance
+SQL> --    Le siège ne peut pas écrire « CREATE TABLE …@lien » : il appelle, à travers le
+SQL> --    lien, la procédure DBMS_UTILITY.EXEC_DDL_STATEMENT du site, qui exécute l'ordre
+SQL> --    avec les droits du compte du site. Les sites n'ont donc besoin que de CREATE TABLE.
+SQL> --
+SQL> --    Chaque fragment porte son prédicat en contrainte CHECK (ck_..._fragment) : une ligne
+SQL> --    d'un autre site est refusée par le site lui-même, la disjonction est garantie.
+SQL> --
+SQL> --    Contraintes qui ne peuvent PAS être posées dans un fragment (une contrainte Oracle
+SQL> --    ne traverse pas un lien) :
+SQL> --      - inscription.id_etudiant -> etudiant : 22 955 inscriptions (6,5 %) concernent un
+SQL> --        étudiant rattaché à un autre site ;
+SQL> --      - unicité de l'e-mail entre sites ; parrain d'un autre site.
+SQL> --    Elles sont vérifiées par les requêtes de contrôle de la partie 7.
+SQL> -- ---------------------------------------------------------------------
+SQL> DECLARE
+  2      PROCEDURE ddl (p_lien VARCHAR2, p_ordre VARCHAR2) IS
+  3      BEGIN
+  4          EXECUTE IMMEDIATE 'BEGIN DBMS_UTILITY.EXEC_DDL_STATEMENT@' || p_lien || '(:o); END;'
+  5              USING p_ordre;
+  6      END;
+  7  BEGIN
+  8      FOR s IN (SELECT id_site, nom_lien FROM catalogue_site ORDER BY id_site) LOOP
+  9  
+ 10          -- Relançable : on repart de fragments vides (ordre inverse des clés étrangères)
+ 11          ddl(s.nom_lien, 'DROP TABLE IF EXISTS inscription   CASCADE CONSTRAINTS PURGE');
+ 12          ddl(s.nom_lien, 'DROP TABLE IF EXISTS session_cours CASCADE CONSTRAINTS PURGE');
+ 13          ddl(s.nom_lien, 'DROP TABLE IF EXISTS etudiant      CASCADE CONSTRAINTS PURGE');
+ 14          ddl(s.nom_lien, 'DROP TABLE IF EXISTS categorie     CASCADE CONSTRAINTS PURGE');
+ 15  
+ 16          ddl(s.nom_lien, '
+ 17              CREATE TABLE categorie (
+ 18                  id_categorie  NUMBER(4)          CONSTRAINT nn_categorie_id      NOT NULL,
+ 19                  libelle       VARCHAR2(40 CHAR)  CONSTRAINT nn_categorie_libelle NOT NULL,
+ 20                  CONSTRAINT pk_categorie         PRIMARY KEY (id_categorie),
+ 21                  CONSTRAINT uq_categorie_libelle UNIQUE (libelle))');
+ 22  
+ 23          ddl(s.nom_lien, '
+ 24              CREATE TABLE etudiant (
+ 25                  id_etudiant       NUMBER(8)          CONSTRAINT nn_etudiant_id     NOT NULL,
+ 26                  nom               VARCHAR2(80 CHAR)  CONSTRAINT nn_etudiant_nom    NOT NULL,
+ 27                  prenom            VARCHAR2(80 CHAR)  CONSTRAINT nn_etudiant_prenom NOT NULL,
+ 28                  email             VARCHAR2(254 CHAR),
+ 29                  telephone         VARCHAR2(10 CHAR),
+ 30                  ville             VARCHAR2(60 CHAR),
+ 31                  id_campus         NUMBER(4)          CONSTRAINT nn_etudiant_campus NOT NULL,
+ 32                  date_inscription  DATE               CONSTRAINT nn_etudiant_date   NOT NULL,
+ 33                  id_parrain        NUMBER(8),
+ 34                  CONSTRAINT pk_etudiant          PRIMARY KEY (id_etudiant),
+ 35                  CONSTRAINT uq_etudiant_email    UNIQUE (email),
+ 36                  CONSTRAINT ck_etudiant_fragment CHECK (id_campus = ' || s.id_site || '))');
+ 37  
+ 38          ddl(s.nom_lien, '
+ 39              CREATE TABLE session_cours (
+ 40                  id_session     NUMBER(8)          CONSTRAINT nn_session_id        NOT NULL,
+ 41                  libelle        VARCHAR2(80 CHAR)  CONSTRAINT nn_session_libelle   NOT NULL,
+ 42                  id_categorie   NUMBER(4)          CONSTRAINT nn_session_categorie NOT NULL,
+ 43                  id_campus      NUMBER(4)          CONSTRAINT nn_session_campus    NOT NULL,
+ 44                  debut          DATE               CONSTRAINT nn_session_debut     NOT NULL,
+ 45                  duree_minutes  NUMBER(3)          CONSTRAINT nn_session_duree     NOT NULL,
+ 46                  capacite       NUMBER(3)          CONSTRAINT nn_session_capacite  NOT NULL,
+ 47                  prix_unitaire  NUMBER(7,2)        CONSTRAINT nn_session_prix      NOT NULL,
+ 48                  derniere_maj   TIMESTAMP DEFAULT SYSTIMESTAMP
+ 49                                                    CONSTRAINT nn_session_maj       NOT NULL,
+ 50                  CONSTRAINT pk_session           PRIMARY KEY (id_session),
+ 51                  CONSTRAINT fk_session_categorie FOREIGN KEY (id_categorie)
+ 52                                                  REFERENCES categorie (id_categorie),
+ 53                  CONSTRAINT ck_session_capacite  CHECK (capacite > 0),
+ 54                  CONSTRAINT ck_session_prix      CHECK (prix_unitaire >= 0),
+ 55                  CONSTRAINT ck_session_fragment  CHECK (id_campus = ' || s.id_site || '))');
+ 56  
+ 57          ddl(s.nom_lien, '
+ 58              CREATE TABLE inscription (
+ 59                  id_inscription  NUMBER(10)         CONSTRAINT nn_inscription_id       NOT NULL,
+ 60                  id_etudiant     NUMBER(8)          CONSTRAINT nn_inscription_etudiant NOT NULL,
+ 61                  id_session      NUMBER(8)          CONSTRAINT nn_inscription_session  NOT NULL,
+ 62                  id_groupe       VARCHAR2(10 CHAR),
+ 63                  date_operation  DATE               CONSTRAINT nn_inscription_date     NOT NULL,
+ 64                  nb_places       NUMBER(3)          CONSTRAINT nn_inscription_places   NOT NULL,
+ 65                  montant         NUMBER(9,2)        CONSTRAINT nn_inscription_montant  NOT NULL,
+ 66                  statut          VARCHAR2(10 CHAR)  CONSTRAINT nn_inscription_statut   NOT NULL,
+ 67                  id_site         NUMBER(4)          CONSTRAINT nn_inscription_site     NOT NULL,
+ 68                  CONSTRAINT pk_inscription          PRIMARY KEY (id_inscription),
+ 69                  CONSTRAINT fk_inscription_session  FOREIGN KEY (id_session)
+ 70                                                     REFERENCES session_cours (id_session),
+ 71                  CONSTRAINT ck_inscription_places   CHECK (nb_places >= 1),
+ 72                  CONSTRAINT ck_inscription_statut   CHECK (statut IN (''CONFIRMEE'', ''ANNULEE'')),
+ 73                  CONSTRAINT ck_inscription_montant  CHECK (montant >= 0),
+ 74                  CONSTRAINT ck_inscription_fragment CHECK (id_site = ' || s.id_site || '))');
+ 75  
+ 76          -- Index du L5 (historique d''un étudiant, places d''une session), utiles aussi
+ 77          -- au contrôle de capacité de pkg_reparti
+ 78          ddl(s.nom_lien, 'CREATE INDEX ix_inscription_etudiant ON inscription (id_etudiant, id_session, statut)');
+ 79          ddl(s.nom_lien, 'CREATE INDEX ix_inscription_session  ON inscription (id_session, statut, nb_places)');
+ 80      END LOOP;
+ 81  END;
+ 82  /
+
+Procédure PL/SQL terminée.
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 4. Remplissage des fragments depuis les tables centrales
+SQL> --    INSERT …@lien SELECT … : le siège pousse vers chaque site les lignes de son
+SQL> --    prédicat. Un COMMIT par site.
+SQL> -- ---------------------------------------------------------------------
+SQL> DECLARE
+  2      v_lien catalogue_site.nom_lien%TYPE;
+  3  BEGIN
+  4      FOR s IN (SELECT id_site, nom_lien FROM catalogue_site ORDER BY id_site) LOOP
+  5          v_lien := s.nom_lien;
+  6  
+  7          EXECUTE IMMEDIATE 'INSERT INTO categorie@' || v_lien
+  8              || ' (id_categorie, libelle) SELECT id_categorie, libelle FROM categorie';
+  9  
+ 10          EXECUTE IMMEDIATE 'INSERT INTO etudiant@' || v_lien
+ 11              || ' (id_etudiant, nom, prenom, email, telephone, ville, id_campus, date_inscription, id_parrain)'
+ 12              || ' SELECT id_etudiant, nom, prenom, email, telephone, ville, id_campus, date_inscription, id_parrain'
+ 13              || ' FROM etudiant WHERE id_campus = :s' USING s.id_site;
+ 14  
+ 15          EXECUTE IMMEDIATE 'INSERT INTO session_cours@' || v_lien
+ 16              || ' (id_session, libelle, id_categorie, id_campus, debut, duree_minutes, capacite, prix_unitaire)'
+ 17              || ' SELECT id_session, libelle, id_categorie, id_campus, debut, duree_minutes, capacite, prix_unitaire'
+ 18              || ' FROM session_cours WHERE id_campus = :s' USING s.id_site;
+ 19  
+ 20          EXECUTE IMMEDIATE 'INSERT INTO inscription@' || v_lien
+ 21              || ' (id_inscription, id_etudiant, id_session, id_groupe, date_operation, nb_places, montant, statut, id_site)'
+ 22              || ' SELECT id_inscription, id_etudiant, id_session, id_groupe, date_operation, nb_places, montant, statut, id_site'
+ 23              || ' FROM inscription WHERE id_site = :s' USING s.id_site;
+ 24  
+ 25          COMMIT;
+ 26      END LOOP;
+ 27  END;
+ 28  /
+
+Procédure PL/SQL terminée.
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 4 bis. Redondance : une copie des sessions d'Angers au siège
+SQL> --    Démarche du Lab 5 (partie 5, VOYAGE_NORD_REPLIQUE), appliquée à notre école.
+SQL> --    Pourquoi SESSION_COURS : c'est le catalogue, lu à chaque consultation et à chaque
+SQL> --    inscription, mais rarement modifié (création d'une session, changement de prix
+SQL> --    ou de salle). Une copie coûte donc peu à tenir à jour. Les inscriptions, elles,
+SQL> --    changent sans arrêt : on ne les recopie pas (la file d'attente s'en charge).
+SQL> --    Pourquoi Angers seulement : c'est le site dont on simule la panne ; pour les autres
+SQL> --    sites, ce serait la même table avec leurs lignes (colonne id_campus).
+SQL> --
+SQL> --    Mise à jour de la copie : différée, par pkg_reparti.synchroniser_replique (à la
+SQL> --    reprise après une panne, et en temps normal à intervalle régulier, par exemple
+SQL> --    chaque nuit). Chaque ligne porte la date de sa dernière modification
+SQL> --    (derniere_maj, aussi dans les fragments) : quand la même session a été modifiée
+SQL> --    des deux côtés, la modification la plus récente l'emporte (« le dernier écrivain
+SQL> --    gagne »). Cela suppose des horloges synchronisées : ici, c'est la même instance.
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE TABLE session_replique (
+  2      id_session     NUMBER(8)          CONSTRAINT nn_repl_id        NOT NULL,
+  3      libelle        VARCHAR2(80 CHAR)  CONSTRAINT nn_repl_libelle   NOT NULL,
+  4      id_categorie   NUMBER(4)          CONSTRAINT nn_repl_categorie NOT NULL,
+  5      id_campus      NUMBER(4)          CONSTRAINT nn_repl_campus    NOT NULL,
+  6      debut          DATE               CONSTRAINT nn_repl_debut     NOT NULL,
+  7      duree_minutes  NUMBER(3)          CONSTRAINT nn_repl_duree     NOT NULL,
+  8      capacite       NUMBER(3)          CONSTRAINT nn_repl_capacite  NOT NULL,
+  9      prix_unitaire  NUMBER(7,2)        CONSTRAINT nn_repl_prix      NOT NULL,
+ 10      derniere_maj   TIMESTAMP          CONSTRAINT nn_repl_maj       NOT NULL,
+ 11      CONSTRAINT pk_session_replique PRIMARY KEY (id_session),
+ 12      CONSTRAINT fk_repl_site        FOREIGN KEY (id_campus) REFERENCES catalogue_site (id_site),
+ 13      CONSTRAINT ck_repl_capacite    CHECK (capacite > 0),
+ 14      CONSTRAINT ck_repl_prix        CHECK (prix_unitaire >= 0)
+ 15  );
+
+Table SESSION_REPLIQUE créé(e).
+
+SQL> 
+SQL> COMMENT ON TABLE session_replique IS 'L6 : copie redondante des sessions d''Angers, lue pendant une panne du site (pkg_reparti.consulter_sessions), resynchronisée par pkg_reparti.synchroniser_replique (le dernier écrivain gagne).';
+
+Comment créé(e).
+
+SQL> 
+SQL> -- Remplie depuis le fragment d'Angers lui-même, à travers le lien : la copie part avec
+SQL> -- les mêmes dates derniere_maj que le site
+SQL> INSERT INTO session_replique (id_session, libelle, id_categorie, id_campus, debut,
+  2                                duree_minutes, capacite, prix_unitaire, derniere_maj)
+  3  SELECT id_session, libelle, id_categorie, id_campus, debut,
+  4         duree_minutes, capacite, prix_unitaire, derniere_maj
+  5  FROM   session_cours@lien_angers;
+
+15 170 lignes inséré.
+
+SQL> COMMIT;
+Validation terminée.
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 5. Vues globales (au siège) : la reconstruction des tables par UNION ALL
+SQL> --    Chaque branche répète le prédicat de son fragment (WHERE id_site = 2…). Il est
+SQL> --    déjà vrai pour toutes les lignes du fragment, mais l'optimiseur du siège ne voit
+SQL> --    pas les contraintes CHECK des sites : c'est ce prédicat qui lui dit quel site
+SQL> --    contient quoi (étape de « localisation » d'une requête répartie). Une requête
+SQL> --    « WHERE id_site = 3 » n'interroge alors que Tours, les deux autres branches sont
+SQL> --    éliminées sans être lancées (FILTER NULL IS NOT NULL, preuve partie 7.6).
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE OR REPLACE VIEW v_g_etudiant AS
+  2  SELECT id_etudiant, nom, prenom, email, telephone, ville, id_campus, date_inscription, id_parrain
+  3  FROM   etudiant@lien_bordeaux WHERE id_campus = 2
+  4  UNION ALL
+  5  SELECT id_etudiant, nom, prenom, email, telephone, ville, id_campus, date_inscription, id_parrain
+  6  FROM   etudiant@lien_tours    WHERE id_campus = 3
+  7  UNION ALL
+  8  SELECT id_etudiant, nom, prenom, email, telephone, ville, id_campus, date_inscription, id_parrain
+  9  FROM   etudiant@lien_angers   WHERE id_campus = 4;
+
+View V_G_ETUDIANT créé(e).
+
+SQL> 
+SQL> CREATE OR REPLACE VIEW v_g_session AS
+  2  SELECT id_session, libelle, id_categorie, id_campus, debut, duree_minutes, capacite, prix_unitaire
+  3  FROM   session_cours@lien_bordeaux WHERE id_campus = 2
+  4  UNION ALL
+  5  SELECT id_session, libelle, id_categorie, id_campus, debut, duree_minutes, capacite, prix_unitaire
+  6  FROM   session_cours@lien_tours    WHERE id_campus = 3
+  7  UNION ALL
+  8  SELECT id_session, libelle, id_categorie, id_campus, debut, duree_minutes, capacite, prix_unitaire
+  9  FROM   session_cours@lien_angers   WHERE id_campus = 4;
+
+View V_G_SESSION créé(e).
+
+SQL> 
+SQL> CREATE OR REPLACE VIEW v_g_inscription AS
+  2  SELECT id_inscription, id_etudiant, id_session, id_groupe, date_operation, nb_places, montant, statut, id_site
+  3  FROM   inscription@lien_bordeaux WHERE id_site = 2
+  4  UNION ALL
+  5  SELECT id_inscription, id_etudiant, id_session, id_groupe, date_operation, nb_places, montant, statut, id_site
+  6  FROM   inscription@lien_tours    WHERE id_site = 3
+  7  UNION ALL
+  8  SELECT id_inscription, id_etudiant, id_session, id_groupe, date_operation, nb_places, montant, statut, id_site
+  9  FROM   inscription@lien_angers   WHERE id_site = 4;
+
+View V_G_INSCRIPTION créé(e).
+
+SQL> 
+SQL> -- Annuaires du siège : où se trouve chaque session et chaque étudiant (id -> site),
+SQL> -- sans aucune donnée personnelle. pkg_reparti s'en sert pour choisir le bon lien sans
+SQL> -- interroger les trois sites, et donc même quand l'un d'eux est en panne.
+SQL> CREATE OR REPLACE VIEW v_annuaire_session AS
+  2  SELECT id_session, id_campus AS id_site FROM session_cours;
+
+View V_ANNUAIRE_SESSION créé(e).
+
+SQL> 
+SQL> CREATE OR REPLACE VIEW v_annuaire_etudiant AS
+  2  SELECT id_etudiant, id_campus AS id_site FROM etudiant;
+
+View V_ANNUAIRE_ETUDIANT créé(e).
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 6. Package des opérations réparties
+SQL> --    - inscrire_parcours : le parcours multi-sites (RG16) sur les fragments, tout ou rien.
+SQL> --      Il écrit dans plusieurs sites en une seule transaction : au COMMIT de l'appelant,
+SQL> --      Oracle fait tout seul une validation à deux phases (2PC) entre les sites. Si un
+SQL> --      site est injoignable, le parcours est refusé en entier (cohérence avant
+SQL> --      disponibilité, voir le classement CAP).
+SQL> --    - inscrire : une inscription simple. Si le site est en panne, elle est mise en
+SQL> --      attente au siège (OPERATION_EN_ATTENTE) et rejouée à la reprise.
+SQL> --    - rejouer_attente : la reprise, qui revérifie la capacité au moment du rejeu.
+SQL> --    - consulter_sessions : lit le catalogue d'un site ; s'il est en panne, bascule sur
+SQL> --      la copie du siège (SESSION_REPLIQUE), comme CONSULTER_VOYAGES_NORD au Lab 5.
+SQL> --    - synchroniser_replique : remet la copie et le site d'accord, dans les deux sens ;
+SQL> --      en cas de conflit, la modification la plus récente gagne.
+SQL> --    Les liens sont choisis à l'exécution (SQL dynamique) : le package reste valide même
+SQL> --    quand un site est en panne.
+SQL> -- ---------------------------------------------------------------------
+SQL> CREATE TABLE operation_en_attente (
+  2      id_attente      NUMBER(10) GENERATED ALWAYS AS IDENTITY,
+  3      id_site         NUMBER(4)          CONSTRAINT nn_attente_site     NOT NULL,
+  4      id_inscription  NUMBER(10)         CONSTRAINT nn_attente_insc     NOT NULL,
+  5      id_etudiant     NUMBER(8)          CONSTRAINT nn_attente_etudiant NOT NULL,
+  6      id_session      NUMBER(8)          CONSTRAINT nn_attente_session  NOT NULL,
+  7      nb_places       NUMBER(3)          CONSTRAINT nn_attente_places   NOT NULL,
+  8      date_operation  DATE               CONSTRAINT nn_attente_date     NOT NULL,
+  9      mise_en_attente DATE DEFAULT SYSDATE CONSTRAINT nn_attente_quand  NOT NULL,
+ 10      etat            VARCHAR2(10 CHAR) DEFAULT 'EN_ATTENTE' CONSTRAINT nn_attente_etat NOT NULL,
+ 11      motif           VARCHAR2(200 CHAR),
+ 12      CONSTRAINT pk_operation_en_attente PRIMARY KEY (id_attente),
+ 13      CONSTRAINT fk_attente_site  FOREIGN KEY (id_site) REFERENCES catalogue_site (id_site),
+ 14      CONSTRAINT ck_attente_etat  CHECK (etat IN ('EN_ATTENTE', 'REJOUEE', 'REFUSEE'))
+ 15  );
+
+Table OPERATION_EN_ATTENTE créé(e).
+
+SQL> 
+SQL> COMMENT ON TABLE operation_en_attente IS 'L6 : inscriptions reçues au siège pendant la panne de leur site, rejouées à la reprise (pkg_reparti.rejouer_attente).';
+
+Comment créé(e).
+
+SQL> 
+SQL> CREATE OR REPLACE PACKAGE pkg_reparti AS
+  2  
+  3      -- Nom du lien vers un site (lu dans catalogue_site)
+  4      FUNCTION lien (p_id_site IN NUMBER) RETURN VARCHAR2;
+  5  
+  6      -- Vrai si l'erreur courante signifie « site injoignable » (compte bloqué, service
+  7      -- arrêté, connexion coupée…)
+  8      FUNCTION erreur_de_lien (p_code IN NUMBER) RETURN BOOLEAN;
+  9  
+ 10      -- Parcours multi-sites sur les fragments : tout ou rien, refuse la sur-réservation
+ 11      -- et refuse tout le parcours si un des sites est injoignable. COMMIT par l'appelant.
+ 12      PROCEDURE inscrire_parcours (
+ 13          p_id_etudiant     IN  NUMBER,
+ 14          p_sessions        IN  t_liste_sessions,
+ 15          p_nb_places       IN  NUMBER DEFAULT 1,
+ 16          p_date_operation  IN  DATE DEFAULT SYSDATE,
+ 17          p_id_groupe       OUT VARCHAR2);
+ 18  
+ 19      -- Inscription simple. p_etat = 'INSCRITE' (posée dans le site) ou 'EN_ATTENTE'
+ 20      -- (site en panne : gardée au siège). COMMIT par l'appelant.
+ 21      PROCEDURE inscrire (
+ 22          p_id_etudiant     IN  NUMBER,
+ 23          p_id_session      IN  NUMBER,
+ 24          p_nb_places       IN  NUMBER DEFAULT 1,
+ 25          p_date_operation  IN  DATE DEFAULT SYSDATE,
+ 26          p_id_inscription  OUT NUMBER,
+ 27          p_etat            OUT VARCHAR2);
+ 28  
+ 29      -- Reprise d'un site : rejoue ses opérations en attente, dans l'ordre d'arrivée.
+ 30      -- Une opération qui n'a plus de place est REFUSEE (avec son motif), pas forcée.
+ 31      PROCEDURE rejouer_attente (p_id_site IN NUMBER);
+ 32  
+ 33      -- Catalogue d'un site : les p_nb_max prochaines sessions à partir de p_a_partir_de,
+ 34      -- affichées par DBMS_OUTPUT. p_source = 'SITE' (lu dans le site) ou 'REPLIQUE'
+ 35      -- (site en panne : lu dans la copie du siège). -20026 si le site est en panne et
+ 36      -- n'a pas de copie.
+ 37      PROCEDURE consulter_sessions (
+ 38          p_id_site      IN  NUMBER,
+ 39          p_a_partir_de  IN  DATE,
+ 40          p_nb_max       IN  NUMBER DEFAULT 5,
+ 41          p_source       OUT VARCHAR2);
+ 42  
+ 43      -- Resynchronise la copie d'un site avec son fragment (le dernier écrivain gagne).
+ 44      -- p_vers_site : lignes recopiées de la copie vers le site (plus récentes au siège) ;
+ 45      -- p_vers_replique : lignes recopiées du site vers la copie. COMMIT par l'appelant
+ 46      -- (validation à deux phases : le siège et le site sont modifiés ensemble).
+ 47      PROCEDURE synchroniser_replique (
+ 48          p_id_site        IN  NUMBER,
+ 49          p_vers_site      OUT NUMBER,
+ 50          p_vers_replique  OUT NUMBER);
+ 51  
+ 52  END pkg_reparti;
+ 53  /
+
+Elément Package PKG_REPARTI compilé
+
+SQL> 
+SQL> CREATE OR REPLACE PACKAGE BODY pkg_reparti AS
+  2  
+  3      FUNCTION lien (p_id_site IN NUMBER) RETURN VARCHAR2 IS
+  4          v_lien catalogue_site.nom_lien%TYPE;
+  5      BEGIN
+  6          SELECT nom_lien INTO v_lien FROM catalogue_site WHERE id_site = p_id_site;
+  7          RETURN v_lien;
+  8      EXCEPTION
+  9          WHEN NO_DATA_FOUND THEN
+ 10              RAISE_APPLICATION_ERROR(-20020, 'Site ' || p_id_site || ' absent du catalogue de répartition');
+ 11      END lien;
+ 12  
+ 13  
+ 14      FUNCTION erreur_de_lien (p_code IN NUMBER) RETURN BOOLEAN IS
+ 15      BEGIN
+ 16          -- 28000 compte bloqué, 1017 mot de passe refusé, 2063/2068 erreur venue du lien,
+ 17          -- 3113/3114/3135/3150 connexion coupée, 12514/12541/12170 service ou réseau
+ 18          -- absent, 2019 lien inconnu
+ 19          RETURN p_code IN (-28000, -1017, -2063, -2068, -3113, -3114, -3135, -3150,
+ 20                            -12514, -12541, -12170, -2019);
+ 21      END erreur_de_lien;
+ 22  
+ 23  
+ 24      -- Ferme le lien après une erreur, pour que l'appel suivant retente une connexion
+ 25      -- au lieu de réutiliser une session morte
+ 26      PROCEDURE fermer_lien (p_lien IN VARCHAR2) IS
+ 27      BEGIN
+ 28          EXECUTE IMMEDIATE 'ALTER SESSION CLOSE DATABASE LINK ' || p_lien;
+ 29      EXCEPTION
+ 30          WHEN OTHERS THEN NULL;   -- lien déjà fermé, ou transaction en cours
+ 31      END fermer_lien;
+ 32  
+ 33  
+ 34      -- Site d'une session, lu dans l'annuaire du siège (pas besoin que le site réponde)
+ 35      FUNCTION site_de_session (p_id_session IN NUMBER) RETURN NUMBER IS
+ 36          v_site NUMBER;
+ 37      BEGIN
+ 38          SELECT id_site INTO v_site FROM v_annuaire_session WHERE id_session = p_id_session;
+ 39          RETURN v_site;
+ 40      EXCEPTION
+ 41          WHEN NO_DATA_FOUND THEN
+ 42              RAISE_APPLICATION_ERROR(-20022, 'Session ' || p_id_session || ' inexistante (RG11)');
+ 43      END site_de_session;
+ 44  
+ 45  
+ 46      PROCEDURE verifier_etudiant (p_id_etudiant IN NUMBER) IS
+ 47          v_nb NUMBER;
+ 48      BEGIN
+ 49          SELECT COUNT(*) INTO v_nb FROM v_annuaire_etudiant WHERE id_etudiant = p_id_etudiant;
+ 50          IF v_nb = 0 THEN
+ 51              RAISE_APPLICATION_ERROR(-20023, 'Étudiant ' || p_id_etudiant || ' inexistant');
+ 52          END IF;
+ 53      END verifier_etudiant;
+ 54  
+ 55  
+ 56      -- Verrouille la session dans son site, vérifie la place et pose l'inscription.
+ 57      -- Même contrôle que pkg_parcours (L4), mais à travers le lien du site.
+ 58      PROCEDURE poser_inscription (
+ 59          p_id_inscription IN NUMBER, p_id_etudiant IN NUMBER, p_id_session IN NUMBER,
+ 60          p_id_site IN NUMBER, p_id_groupe IN VARCHAR2, p_nb_places IN NUMBER,
+ 61          p_date_operation IN DATE)
+ 62      IS
+ 63          v_lien      catalogue_site.nom_lien%TYPE := lien(p_id_site);
+ 64          v_capacite  NUMBER;
+ 65          v_prix      NUMBER;
+ 66          v_debut     DATE;
+ 67          v_occupees  NUMBER;
+ 68      BEGIN
+ 69          -- Verrou de la ligne de la session dans le site (correction de concurrence du L4)
+ 70          EXECUTE IMMEDIATE 'SELECT capacite, prix_unitaire, debut FROM session_cours@' || v_lien
+ 71              || ' WHERE id_session = :s FOR UPDATE'
+ 72              INTO v_capacite, v_prix, v_debut USING p_id_session;
+ 73  
+ 74          IF p_date_operation > v_debut THEN
+ 75              RAISE_APPLICATION_ERROR(-20024, 'Session ' || p_id_session
+ 76                  || ' déjà commencée le ' || TO_CHAR(v_debut, 'DD/MM/YYYY') || ' (RG11)');
+ 77          END IF;
+ 78  
+ 79          EXECUTE IMMEDIATE 'SELECT NVL(SUM(nb_places), 0) FROM inscription@' || v_lien
+ 80              || ' WHERE id_session = :s AND statut = ''CONFIRMEE'''
+ 81              INTO v_occupees USING p_id_session;
+ 82  
+ 83          IF v_capacite - v_occupees < p_nb_places THEN
+ 84              RAISE_APPLICATION_ERROR(-20021, 'Session ' || p_id_session || ' : '
+ 85                  || GREATEST(v_capacite - v_occupees, 0) || ' place(s) libre(s) sur '
+ 86                  || v_capacite || ', ' || p_nb_places || ' demandée(s) (RG15)');
+ 87          END IF;
+ 88  
+ 89          EXECUTE IMMEDIATE 'INSERT INTO inscription@' || v_lien
+ 90              || ' (id_inscription, id_etudiant, id_session, id_groupe, date_operation,'
+ 91              || '  nb_places, montant, statut, id_site)'
+ 92              || ' VALUES (:i, :e, :s, :g, :d, :n, :m, ''CONFIRMEE'', :site)'
+ 93              USING p_id_inscription, p_id_etudiant, p_id_session, p_id_groupe,
+ 94                    p_date_operation, p_nb_places, p_nb_places * v_prix, p_id_site;
+ 95      END poser_inscription;
+ 96  
+ 97  
+ 98      PROCEDURE inscrire_parcours (
+ 99          p_id_etudiant     IN  NUMBER,
+100          p_sessions        IN  t_liste_sessions,
+101          p_nb_places       IN  NUMBER DEFAULT 1,
+102          p_date_operation  IN  DATE DEFAULT SYSDATE,
+103          p_id_groupe       OUT VARCHAR2)
+104      IS
+105          v_nb       NUMBER;
+106          v_distinct NUMBER;
+107          v_site     NUMBER;
+108          v_code     NUMBER;
+109          v_message  VARCHAR2(512);
+110      BEGIN
+111          SELECT COUNT(*), COUNT(DISTINCT column_value) INTO v_nb, v_distinct FROM TABLE(p_sessions);
+112          IF v_nb < 2 OR v_distinct < v_nb THEN
+113              RAISE_APPLICATION_ERROR(-20025,
+114                  'Un parcours compte au moins 2 sessions différentes');
+115          END IF;
+116          verifier_etudiant(p_id_etudiant);
+117  
+118          SAVEPOINT avant_parcours_reparti;
+119          BEGIN
+120              p_id_groupe := 'G' || TO_CHAR(seq_groupe.NEXTVAL, 'FM00000');
+121  
+122              -- Ordre croissant des sessions : même ordre de verrouillage pour tous
+123              FOR s IN (SELECT column_value AS id_session FROM TABLE(p_sessions) ORDER BY 1) LOOP
+124                  v_site := site_de_session(s.id_session);
+125                  poser_inscription(seq_inscription.NEXTVAL, p_id_etudiant, s.id_session,
+126                                    v_site, p_id_groupe, p_nb_places, p_date_operation);
+127              END LOOP;
+128          EXCEPTION
+129              WHEN OTHERS THEN
+130                  v_code    := SQLCODE;
+131                  v_message := SQLERRM;
+132                  -- Tout ou rien, sur tous les sites à la fois : le retour au point de
+133                  -- sauvegarde défait aussi les lignes déjà posées dans les autres sites
+134                  ROLLBACK TO SAVEPOINT avant_parcours_reparti;
+135                  p_id_groupe := NULL;
+136                  IF erreur_de_lien(v_code) THEN
+137                      fermer_lien(lien(v_site));
+138                      RAISE_APPLICATION_ERROR(-20020, 'Site ' || v_site
+139                          || ' injoignable : parcours refusé en entier, aucun site modifié ('
+140                          || v_message || ')');
+141                  END IF;
+142                  RAISE;
+143          END;
+144      END inscrire_parcours;
+145  
+146  
+147      PROCEDURE inscrire (
+148          p_id_etudiant     IN  NUMBER,
+149          p_id_session      IN  NUMBER,
+150          p_nb_places       IN  NUMBER DEFAULT 1,
+151          p_date_operation  IN  DATE DEFAULT SYSDATE,
+152          p_id_inscription  OUT NUMBER,
+153          p_etat            OUT VARCHAR2)
+154      IS
+155          v_site    NUMBER := site_de_session(p_id_session);
+156          v_message VARCHAR2(512);
+157      BEGIN
+158          verifier_etudiant(p_id_etudiant);
+159          p_id_inscription := seq_inscription.NEXTVAL;
+160  
+161          SAVEPOINT avant_inscription;
+162          BEGIN
+163              poser_inscription(p_id_inscription, p_id_etudiant, p_id_session, v_site,
+164                                NULL, p_nb_places, p_date_operation);
+165              p_etat := 'INSCRITE';
+166          EXCEPTION
+167              WHEN OTHERS THEN
+168                  IF NOT erreur_de_lien(SQLCODE) THEN RAISE; END IF;
+169                  v_message := SUBSTR(SQLERRM, 1, 200);
+170                  -- Site en panne : on garde la demande au siège, avec le même numéro
+171                  -- d'inscription, pour la rejouer à la reprise
+172                  ROLLBACK TO SAVEPOINT avant_inscription;
+173                  fermer_lien(lien(v_site));
+174                  INSERT INTO operation_en_attente (id_site, id_inscription, id_etudiant,
+175                              id_session, nb_places, date_operation, motif)
+176                  VALUES (v_site, p_id_inscription, p_id_etudiant, p_id_session,
+177                          p_nb_places, p_date_operation, v_message);
+178                  p_etat := 'EN_ATTENTE';
+179          END;
+180      END inscrire;
+181  
+182  
+183      PROCEDURE rejouer_attente (p_id_site IN NUMBER) IS
+184          v_code    NUMBER;
+185          v_message VARCHAR2(200);
+186      BEGIN
+187          FOR a IN (SELECT * FROM operation_en_attente
+188                    WHERE  id_site = p_id_site AND etat = 'EN_ATTENTE'
+189                    ORDER BY id_attente) LOOP
+190              SAVEPOINT avant_rejeu;
+191              BEGIN
+192                  poser_inscription(a.id_inscription, a.id_etudiant, a.id_session, a.id_site,
+193                                    NULL, a.nb_places, a.date_operation);
+194                  UPDATE operation_en_attente SET etat = 'REJOUEE', motif = NULL
+195                  WHERE  id_attente = a.id_attente;
+196              EXCEPTION
+197                  WHEN OTHERS THEN
+198                      v_code    := SQLCODE;
+199                      v_message := SUBSTR(SQLERRM, 1, 200);
+200                      ROLLBACK TO SAVEPOINT avant_rejeu;
+201                      -- Site toujours en panne : on arrête, tout reste en attente
+202                      IF erreur_de_lien(v_code) THEN RAISE; END IF;
+203                      -- Sinon (session pleine entre-temps…) : refus tracé, pas de forçage
+204                      UPDATE operation_en_attente
+205                      SET    etat = 'REFUSEE', motif = v_message
+206                      WHERE  id_attente = a.id_attente;
+207              END;
+208          END LOOP;
+209      END rejouer_attente;
+210  
+211  
+212      PROCEDURE consulter_sessions (
+213          p_id_site      IN  NUMBER,
+214          p_a_partir_de  IN  DATE,
+215          p_nb_max       IN  NUMBER DEFAULT 5,
+216          p_source       OUT VARCHAR2)
+217      IS
+218          TYPE t_ligne IS RECORD (id_session NUMBER, libelle VARCHAR2(80 CHAR), debut DATE,
+219                                  capacite NUMBER, prix_unitaire NUMBER);
+220          TYPE t_lignes IS TABLE OF t_ligne;
+221          v_lignes  t_lignes;
+222          v_lien    catalogue_site.nom_lien%TYPE := lien(p_id_site);
+223          v_code    NUMBER;
+224          v_message VARCHAR2(512);
+225      BEGIN
+226          -- 1. Le site principal. Toutes les lignes sont lues dans ce bloc (BULK COLLECT) :
+227          --    une coupure pendant la lecture fait aussi basculer. Le lien est écrit en SQL
+228          --    dynamique : la procédure reste valide pendant la panne (piège PLS-00905
+229          --    signalé au Lab 5).
+230          BEGIN
+231              EXECUTE IMMEDIATE 'SELECT id_session, libelle, debut, capacite, prix_unitaire'
+232                  || ' FROM session_cours@' || v_lien
+233                  || ' WHERE debut >= :d ORDER BY debut, id_session FETCH FIRST :n ROWS ONLY'
+234                  BULK COLLECT INTO v_lignes USING p_a_partir_de, p_nb_max;
+235              p_source := 'SITE';
+236          EXCEPTION
+237              WHEN OTHERS THEN
+238                  v_code    := SQLCODE;
+239                  v_message := SQLERRM;
+240                  IF NOT erreur_de_lien(v_code) THEN RAISE; END IF;
+241                  fermer_lien(v_lien);
+242                  DBMS_OUTPUT.PUT_LINE('Site ' || p_id_site || ' injoignable : '
+243                      || REPLACE(v_message, CHR(10), ' '));
+244  
+245                  -- 2. Bascule sur la copie du siège
+246                  SELECT id_session, libelle, debut, capacite, prix_unitaire
+247                  BULK COLLECT INTO v_lignes
+248                  FROM   session_replique
+249                  WHERE  id_campus = p_id_site AND debut >= p_a_partir_de
+250                  ORDER BY debut, id_session
+251                  FETCH FIRST p_nb_max ROWS ONLY;
+252  
+253                  IF v_lignes.COUNT = 0 THEN
+254                      RAISE_APPLICATION_ERROR(-20026, 'Site ' || p_id_site
+255                          || ' injoignable et sans copie au siège');
+256                  END IF;
+257                  DBMS_OUTPUT.PUT_LINE('Bascule sur la copie du siège (SESSION_REPLIQUE)');
+258                  p_source := 'REPLIQUE';
+259          END;
+260  
+261          DBMS_OUTPUT.PUT_LINE('Sessions du site ' || p_id_site || ' lues dans : ' || p_source);
+262          FOR i IN 1 .. v_lignes.COUNT LOOP
+263              DBMS_OUTPUT.PUT_LINE('  session ' || v_lignes(i).id_session || ', '
+264                  || TO_CHAR(v_lignes(i).debut, 'DD/MM/YYYY HH24:MI') || ', '
+265                  || v_lignes(i).libelle || ', ' || v_lignes(i).capacite || ' places, '
+266                  || TO_CHAR(v_lignes(i).prix_unitaire, 'FM99990.00') || ' EUR');
+267          END LOOP;
+268      END consulter_sessions;
+269  
+270  
+271      PROCEDURE synchroniser_replique (
+272          p_id_site        IN  NUMBER,
+273          p_vers_site      OUT NUMBER,
+274          p_vers_replique  OUT NUMBER)
+275      IS
+276          TYPE t_sessions IS TABLE OF session_replique%ROWTYPE;
+277          v_plus_recentes t_sessions;
+278          v_lien          catalogue_site.nom_lien%TYPE := lien(p_id_site);
+279          v_code          NUMBER;
+280          v_message       VARCHAR2(512);
+281      BEGIN
+282          -- 1. Sessions plus récentes dans la copie (modifiées au siège, par exemple pendant
+283          --    une panne) : on les recopie dans le site
+284          EXECUTE IMMEDIATE 'SELECT r.id_session, r.libelle, r.id_categorie, r.id_campus, r.debut,'
+285              || ' r.duree_minutes, r.capacite, r.prix_unitaire, r.derniere_maj'
+286              || ' FROM session_replique r JOIN session_cours@' || v_lien || ' s'
+287              || ' ON s.id_session = r.id_session'
+288              || ' WHERE r.id_campus = :site AND r.derniere_maj > s.derniere_maj'
+289              BULK COLLECT INTO v_plus_recentes USING p_id_site;
+290  
+291          FOR i IN 1 .. v_plus_recentes.COUNT LOOP
+292              EXECUTE IMMEDIATE 'UPDATE session_cours@' || v_lien
+293                  || ' SET libelle = :l, id_categorie = :c, debut = :d, duree_minutes = :du,'
+294                  || ' capacite = :ca, prix_unitaire = :p, derniere_maj = :m'
+295                  || ' WHERE id_session = :id'
+296                  USING v_plus_recentes(i).libelle, v_plus_recentes(i).id_categorie,
+297                        v_plus_recentes(i).debut, v_plus_recentes(i).duree_minutes,
+298                        v_plus_recentes(i).capacite, v_plus_recentes(i).prix_unitaire,
+299                        v_plus_recentes(i).derniere_maj, v_plus_recentes(i).id_session;
+300          END LOOP;
+301          p_vers_site := v_plus_recentes.COUNT;
+302  
+303          -- 2. Sessions plus récentes dans le site, ou nouvelles : on les recopie au siège.
+304          --    Les lignes recopiées à l'étape 1 ont maintenant la même date des deux côtés :
+305          --    elles ne bougent plus.
+306          EXECUTE IMMEDIATE 'MERGE INTO session_replique r'
+307              || ' USING (SELECT id_session, libelle, id_categorie, id_campus, debut,'
+308              || '               duree_minutes, capacite, prix_unitaire, derniere_maj'
+309              || '        FROM session_cours@' || v_lien || ') s'
+310              || ' ON (r.id_session = s.id_session)'
+311              || ' WHEN MATCHED THEN UPDATE SET r.libelle = s.libelle, r.id_categorie = s.id_categorie,'
+312              || '      r.debut = s.debut, r.duree_minutes = s.duree_minutes, r.capacite = s.capacite,'
+313              || '      r.prix_unitaire = s.prix_unitaire, r.derniere_maj = s.derniere_maj'
+314              || '      WHERE s.derniere_maj > r.derniere_maj'
+315              || ' WHEN NOT MATCHED THEN INSERT (id_session, libelle, id_categorie, id_campus, debut,'
+316              || '      duree_minutes, capacite, prix_unitaire, derniere_maj)'
+317              || '      VALUES (s.id_session, s.libelle, s.id_categorie, s.id_campus, s.debut,'
+318              || '      s.duree_minutes, s.capacite, s.prix_unitaire, s.derniere_maj)';
+319          p_vers_replique := SQL%ROWCOUNT;
+320      EXCEPTION
+321          WHEN OTHERS THEN
+322              v_code    := SQLCODE;
+323              v_message := SQLERRM;
+324              IF erreur_de_lien(v_code) THEN
+325                  fermer_lien(v_lien);
+326                  RAISE_APPLICATION_ERROR(-20020, 'Site ' || p_id_site
+327                      || ' injoignable : synchronisation impossible (' || v_message || ')');
+328              END IF;
+329              RAISE;
+330      END synchroniser_replique;
+331  
+332  END pkg_reparti;
+333  /
+
+Elément Package Body PKG_REPARTI compilé
+
+SQL> 
+SQL> 
+SQL> -- ---------------------------------------------------------------------
+SQL> -- 7. Vérifications (résultats dans run_all.log et preuves/L6_distribution.txt)
+SQL> -- ---------------------------------------------------------------------
+SQL> SET LINESIZE 200
+SQL> SET PAGESIZE 100
+SQL> COLUMN ville FORMAT A10
+SQL> 
+SQL> -- 7.1 Taille de chaque fragment, lue directement dans chaque site
+SQL> COLUMN table_globale FORMAT A18
+SQL> SELECT 'ETUDIANT' AS table_globale,
+  2         (SELECT COUNT(*) FROM etudiant@lien_bordeaux) AS bordeaux,
+  3         (SELECT COUNT(*) FROM etudiant@lien_tours)    AS tours,
+  4         (SELECT COUNT(*) FROM etudiant@lien_angers)   AS angers,
+  5         (SELECT COUNT(*) FROM v_g_etudiant)           AS vue_globale,
+  6         (SELECT COUNT(*) FROM etudiant)               AS centrale
+  7  FROM dual
+  8  UNION ALL
+  9  SELECT 'SESSION_COURS',
+ 10         (SELECT COUNT(*) FROM session_cours@lien_bordeaux),
+ 11         (SELECT COUNT(*) FROM session_cours@lien_tours),
+ 12         (SELECT COUNT(*) FROM session_cours@lien_angers),
+ 13         (SELECT COUNT(*) FROM v_g_session),
+ 14         (SELECT COUNT(*) FROM session_cours)
+ 15  FROM dual
+ 16  UNION ALL
+ 17  SELECT 'INSCRIPTION',
+ 18         (SELECT COUNT(*) FROM inscription@lien_bordeaux),
+ 19         (SELECT COUNT(*) FROM inscription@lien_tours),
+ 20         (SELECT COUNT(*) FROM inscription@lien_angers),
+ 21         (SELECT COUNT(*) FROM v_g_inscription),
+ 22         (SELECT COUNT(*) FROM inscription)
+ 23  FROM dual
+ 24  UNION ALL
+ 25  SELECT 'CATEGORIE (copie)',
+ 26         (SELECT COUNT(*) FROM categorie@lien_bordeaux),
+ 27         (SELECT COUNT(*) FROM categorie@lien_tours),
+ 28         (SELECT COUNT(*) FROM categorie@lien_angers),
+ 29         NULL,
+ 30         (SELECT COUNT(*) FROM categorie)
+ 31  FROM dual;
+
+TABLE_GLOBALE        BORDEAUX      TOURS     ANGERS VUE_GLOBALE   CENTRALE
+------------------ ---------- ---------- ---------- ----------- ----------
+ETUDIANT                 4646       9820       7005       21471      21471
+SESSION_COURS           10486      21963      15170       47619      47619
+INSCRIPTION             78676     162669     113113      354458     354458
+CATEGORIE (copie)           6          6          6                      6
+
+SQL> -- Résultat attendu : ETUDIANT 4 646 / 9 820 / 7 005 = 21 471 ; SESSION_COURS 10 486 /
+SQL> -- 21 963 / 15 170 = 47 619 ; INSCRIPTION 78 676 / 162 669 / 113 113 = 354 458 ;
+SQL> -- CATEGORIE 6 dans chaque site
+SQL> 
+SQL> -- 7.2 Complétude et reconstruction : la vue globale redonne exactement la table
+SQL> -- centrale, ligne pour ligne et colonne pour colonne (0 partout)
+SQL> SELECT 'ETUDIANT' AS table_globale,
+  2         (SELECT COUNT(*) FROM (SELECT * FROM etudiant MINUS SELECT * FROM v_g_etudiant)) AS manquantes,
+  3         (SELECT COUNT(*) FROM (SELECT * FROM v_g_etudiant MINUS SELECT * FROM etudiant)) AS en_trop
+  4  FROM dual
+  5  UNION ALL
+  6  SELECT 'SESSION_COURS',
+  7         (SELECT COUNT(*) FROM (SELECT id_session, libelle, id_categorie, id_campus, debut,
+  8                                       duree_minutes, capacite, prix_unitaire FROM session_cours
+  9                                MINUS SELECT * FROM v_g_session)),
+ 10         (SELECT COUNT(*) FROM (SELECT * FROM v_g_session
+ 11                                MINUS SELECT id_session, libelle, id_categorie, id_campus, debut,
+ 12                                             duree_minutes, capacite, prix_unitaire FROM session_cours))
+ 13  FROM dual
+ 14  UNION ALL
+ 15  SELECT 'INSCRIPTION',
+ 16         (SELECT COUNT(*) FROM (SELECT id_inscription, id_etudiant, id_session, id_groupe,
+ 17                                       date_operation, nb_places, montant, statut, id_site
+ 18                                FROM inscription MINUS SELECT * FROM v_g_inscription)),
+ 19         (SELECT COUNT(*) FROM (SELECT * FROM v_g_inscription
+ 20                                MINUS SELECT id_inscription, id_etudiant, id_session, id_groupe,
+ 21                                             date_operation, nb_places, montant, statut, id_site
+ 22                                      FROM inscription))
+ 23  FROM dual;
+
+TABLE_GLOBALE      MANQUANTES    EN_TROP
+------------------ ---------- ----------
+ETUDIANT                    0          0
+SESSION_COURS               0          0
+INSCRIPTION                 0          0
+
+SQL> -- Résultat attendu : 0 et 0 pour les trois tables
+SQL> 
+SQL> -- 7.3 Disjonction : aucune ligne dans deux fragments (garantie aussi par les CHECK)
+SQL> SELECT (SELECT COUNT(*) FROM (SELECT id_etudiant FROM v_g_etudiant
+  2                                GROUP BY id_etudiant HAVING COUNT(*) > 1))    AS etudiants_doubles,
+  3         (SELECT COUNT(*) FROM (SELECT id_session FROM v_g_session
+  4                                GROUP BY id_session HAVING COUNT(*) > 1))     AS sessions_doubles,
+  5         (SELECT COUNT(*) FROM (SELECT id_inscription FROM v_g_inscription
+  6                                GROUP BY id_inscription HAVING COUNT(*) > 1)) AS inscriptions_doubles
+  7  FROM dual;
+
+ETUDIANTS_DOUBLES SESSIONS_DOUBLES INSCRIPTIONS_DOUBLES
+----------------- ---------------- --------------------
+                0                0                    0
+
+SQL> -- Résultat attendu : 0, 0, 0
+SQL> 
+SQL> -- 7.4 Contraintes qu'aucun site ne peut garantir seul, vérifiées à travers les liens.
+SQL> -- Piège mesuré : écrite avec NOT EXISTS, la requête a pris 4 min 27 s, car Oracle
+SQL> -- interrogeait le site distant une fois par inscription (boucle imbriquée à travers le
+SQL> -- lien). Le hint USE_HASH fait venir chaque côté une seule fois, puis joint au siège :
+SQL> -- 0,3 s pour le même résultat.
+SQL> SELECT /*+ USE_HASH(i e) NO_MERGE(i) NO_MERGE(e) */
+  2         COUNT(*)                                               AS inscriptions,
+  3         SUM(CASE WHEN e.id_etudiant IS NULL THEN 1 ELSE 0 END) AS inscriptions_orphelines,
+  4         SUM(CASE WHEN e.id_campus <> i.id_site THEN 1 ELSE 0 END) AS inscriptions_etudiant_distant
+  5  FROM      (SELECT id_etudiant, id_site   FROM v_g_inscription) i
+  6  LEFT JOIN (SELECT id_etudiant, id_campus FROM v_g_etudiant)    e ON e.id_etudiant = i.id_etudiant;
+
+INSCRIPTIONS INSCRIPTIONS_ORPHELINES INSCRIPTIONS_ETUDIANT_DISTANT
+------------ ----------------------- -----------------------------
+      354458                       0                         22955
+
+SQL> -- Résultat attendu : 354 458 inscriptions, 0 orpheline, 22 955 (6,5 %) dont l'étudiant
+SQL> -- est stocké dans un autre site (le coût de la fragmentation d'ETUDIANT)
+SQL> 
+SQL> SELECT COUNT(*) AS emails_dans_2_sites
+  2  FROM  (SELECT email FROM v_g_etudiant WHERE email IS NOT NULL
+  3         GROUP BY email HAVING COUNT(*) > 1);
+
+EMAILS_DANS_2_SITES
+-------------------
+                  0
+
+SQL> -- Résultat attendu : 0 (RG4 tenue entre les sites)
+SQL> 
+SQL> -- 7.5 Valeurs de contrôle recalculées sur les fragments : mêmes valeurs qu'en central
+SQL> -- C5 : chiffre d'affaires par site
+SQL> SELECT i.id_site, SUM(i.montant) AS c5_chiffre_affaires
+  2  FROM   v_g_inscription i
+  3  WHERE  i.statut = 'CONFIRMEE'
+  4  GROUP BY i.id_site
+  5  ORDER BY i.id_site;
+
+   ID_SITE C5_CHIFFRE_AFFAIRES
+---------- -------------------
+         2            27333192
+         3            56080982
+         4            39082945
+
+SQL> -- Résultat attendu : 2 -> 27 333 192 ; 3 -> 56 080 982 ; 4 -> 39 082 945
+SQL> 
+SQL> -- C6 : personnes ayant des opérations sur au moins deux sites (requête multi-sites)
+SQL> SELECT COUNT(*) AS c6_personnes_multi_sites
+  2  FROM  (SELECT id_etudiant FROM v_g_inscription
+  3         GROUP BY id_etudiant HAVING COUNT(DISTINCT id_site) >= 2);
+
+C6_PERSONNES_MULTI_SITES
+------------------------
+                   12356
+
+SQL> -- Résultat attendu : 12 356
+SQL> 
+SQL> -- 7.6 Élimination des fragments inutiles : une requête sur Tours n'interroge que Tours.
+SQL> -- Colonne Starts du plan : 1 pour la branche REMOTE de Tours, 0 pour les deux autres.
+SQL> -- Le plan est retrouvé dans V$SQL par un marqueur (L6_LOCALISATION), comme au L5 : un
+SQL> -- run_all précédent laisse d'anciennes versions de la requête, on prend la plus récente.
+SQL> SELECT /*+ GATHER_PLAN_STATISTICS L6_LOCALISATION */ COUNT(*), SUM(montant)
+  2  FROM   v_g_inscription
+  3  WHERE  id_site = 3 AND statut = 'CONFIRMEE';
+
+  COUNT(*) SUM(MONTANT)
+---------- ------------
+    149658     56080982
+
+SQL> 
+SQL> SELECT p.plan_table_output
+  2  FROM  (SELECT sql_id, child_number FROM v$sql
+  3         WHERE  sql_text LIKE '%L6_LOCALISATION%' AND sql_text NOT LIKE '%v$sql%'
+  4         ORDER BY last_active_time DESC FETCH FIRST 1 ROW ONLY) q,
+  5         TABLE(DBMS_XPLAN.DISPLAY_CURSOR(q.sql_id, q.child_number, 'ALLSTATS LAST +REMOTE')) p;
+
+PLAN_TABLE_OUTPUT                                                                                                                                               
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+SQL_ID  0ffwcdddnb1cw, child number 0
+-------------------------------------
+SELECT /*+ GATHER_PLAN_STATISTICS L6_LOCALISATION */ COUNT(*), 
+SUM(montant) FROM   v_g_inscription WHERE  id_site = 3 AND statut = 
+'CONFIRMEE'
+ 
+Plan hash value: 2367150689
+ 
+----------------------------------------------------------------------------------------------------
+| Id  | Operation        | Name            | Starts | E-Rows | Inst   |IN-OUT| A-Rows |   A-Time   |
+----------------------------------------------------------------------------------------------------
+|   0 | SELECT STATEMENT |                 |      1 |        |        |      |      1 |00:00:00.05 |
+|   1 |  SORT AGGREGATE  |                 |      1 |      1 |        |      |      1 |00:00:00.05 |
+|   2 |   VIEW           | V_G_INSCRIPTION |      1 |      3 |        |      |    149K|00:00:00.06 |
+|   3 |    UNION-ALL     |                 |      1 |      3 |        |      |    149K|00:00:00.04 |
+|*  4 |     FILTER       |                 |      1 |        |        |      |      0 |00:00:00.01 |
+|   5 |      REMOTE      | INSCRIPTION     |      0 |      1 | LIEN_~ | R->S |      0 |00:00:00.01 |
+|   6 |     REMOTE       | INSCRIPTION     |      1 |      1 | LIEN_~ | R->S |    149K|00:00:00.02 |
+|*  7 |     FILTER       |                 |      1 |        |        |      |      0 |00:00:00.01 |
+|   8 |      REMOTE      | INSCRIPTION     |      0 |      1 | LIEN_~ | R->S |      0 |00:00:00.01 |
+----------------------------------------------------------------------------------------------------
+ 
+Predicate Information (identified by operation id):
+---------------------------------------------------
+ 
+   4 - filter(NULL IS NOT NULL)
+   7 - filter(NULL IS NOT NULL)
+ 
+Remote SQL Information (identified by operation id):
+----------------------------------------------------
+ 
+   5 - SELECT /*+ GATHER_PLAN_STATISTICS */ "MONTANT","STATUT","ID_SITE" FROM "INSCRIPTION" 
+       "INSCRIPTION" WHERE "ID_SITE"=2 AND "STATUT"='CONFIRMEE' (accessing 'LIEN_BORDEAUX' )
+ 
+   6 - SELECT /*+ GATHER_PLAN_STATISTICS */ "MONTANT","STATUT","ID_SITE" FROM "INSCRIPTION" 
+       "INSCRIPTION" WHERE "ID_SITE"=3 AND "STATUT"='CONFIRMEE' (accessing 'LIEN_TOURS' )
+ 
+   8 - SELECT /*+ GATHER_PLAN_STATISTICS */ "MONTANT","STATUT","ID_SITE" FROM "INSCRIPTION" 
+       "INSCRIPTION" WHERE "ID_SITE"=4 AND "STATUT"='CONFIRMEE' (accessing 'LIEN_ANGERS' )
+ 
+ 
+
+41 lignes sélectionnées. 
+
+SQL> -- Résultat attendu : les branches de Bordeaux et d'Angers passent sous un FILTER
+SQL> -- « NULL IS NOT NULL » et ne sont jamais lancées (Starts = 0)
+SQL> 
+SQL> -- 7.7 Redondance : la copie du siège est identique au fragment d'Angers (dates comprises)
+SQL> SELECT (SELECT COUNT(*) FROM session_replique) AS lignes_copie,
+  2         (SELECT COUNT(*) FROM session_cours@lien_angers) AS lignes_angers,
+  3         (SELECT COUNT(*) FROM (SELECT id_session, libelle, id_categorie, id_campus, debut,
+  4                                       duree_minutes, capacite, prix_unitaire, derniere_maj
+  5                                FROM session_cours@lien_angers
+  6                                MINUS SELECT * FROM session_replique)) AS ecarts
+  7  FROM dual;
+
+LIGNES_COPIE LIGNES_ANGERS     ECARTS
+------------ ------------- ----------
+       15170         15170          0
+
+SQL> -- Résultat attendu : 15 170, 15 170, 0 écart
+SQL> 
+SQL> -- En temps normal, la consultation du catalogue lit le site lui-même (source SITE)
+SQL> SET SERVEROUTPUT ON
+SQL> DECLARE
+  2      v_source VARCHAR2(10);
+  3  BEGIN
+  4      pkg_reparti.consulter_sessions(4, DATE '2026-12-01', 3, v_source);
+  5  END;
+  6  /
+Sessions du site 4 lues dans : SITE
+  session 11286, 01/12/2026 08:30, Session allemand 11286, 16 places, 158.00 EUR
+  session 3926, 01/12/2026 09:45, Session FLE 3926, 12 places, 258.00 EUR
+  session 9209, 01/12/2026 09:45, Session FLE 9209, 16 places, 297.00 EUR
+
+
+Procédure PL/SQL terminée.
+
+SQL> @@11_bonus_objet.sql
+SQL> -- =====================================================================
+SQL> -- 11_bonus_objet.sql
+SQL> -- Livrable : Bonus objet-relationnel
+SQL> -- Responsable : Baptiste (avec Claude Code)
+SQL> -- Attendu  : type objet avec héritage et méthode, utilisé dans une requête
+SQL> -- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+SQL> --
+SQL> -- On reprend l'héritage déjà présent dans le modèle (L1) : un CAMPUS est soit
+SQL> -- le siège, soit un site. Ici il est écrit en types objet :
+SQL> --   t_campus (type parent, NOT FINAL pour pouvoir en hériter) et sa méthode presenter()
+SQL> --   t_site UNDER t_campus : hérite des attributs et de la méthode, ajoute id_siege
+SQL> -- Une seule table objet de type t_campus accueille les deux (le siège en t_campus,
+SQL> -- les sites en t_site), puis une requête appelle la méthode sur chaque ligne.
+SQL> -- Le nettoyage (00_nettoyage.sql) supprime déjà les types (DROP TYPE ... FORCE).
+SQL> -- =====================================================================
+SQL> 
+SQL> SET SERVEROUTPUT ON
+SQL> SET LINESIZE 200
+SQL> 
+SQL> -- Type parent : NOT FINAL autorise l'héritage
+SQL> CREATE OR REPLACE TYPE t_campus AS OBJECT (
+  2      id_campus  NUMBER(4),
+  3      nom        VARCHAR2(60 CHAR),
+  4      ville      VARCHAR2(60 CHAR),
+  5      MEMBER FUNCTION presenter RETURN VARCHAR2
+  6  ) NOT FINAL;
+  7  /
+
+Elément Type T_CAMPUS compilé
+
+SQL> 
+SQL> CREATE OR REPLACE TYPE BODY t_campus AS
+  2      MEMBER FUNCTION presenter RETURN VARCHAR2 IS
+  3      BEGIN
+  4          RETURN nom || ' (' || ville || ')';
+  5      END;
+  6  END;
+  7  /
+
+Elément Type Body T_CAMPUS compilé
+
+SQL> 
+SQL> -- Sous-type : un site est un campus qui dépend du siège
+SQL> CREATE OR REPLACE TYPE t_site UNDER t_campus (
+  2      id_siege   NUMBER(4)
+  3  );
+  4  /
+
+Elément Type T_SITE compilé
+
+SQL> 
+SQL> -- Table objet : chaque ligne est un objet t_campus, ou d'un sous-type (t_site)
+SQL> CREATE TABLE campus_objet OF t_campus (
+  2      CONSTRAINT pk_campus_objet PRIMARY KEY (id_campus)
+  3  );
+
+Table CAMPUS_OBJET créé(e).
+
+SQL> 
+SQL> -- Remplissage à partir des tables du L1
+SQL> INSERT INTO campus_objet
+  2  SELECT t_campus(c.id_campus, c.nom, c.ville)
+  3  FROM   campus c JOIN siege g ON g.id_campus = c.id_campus;
+
+1 ligne inséré.
+
+SQL> 
+SQL> INSERT INTO campus_objet
+  2  SELECT t_site(c.id_campus, c.nom, c.ville, s.id_siege)
+  3  FROM   campus c JOIN site s ON s.id_campus = c.id_campus;
+
+3 lignes inséré.
+
+SQL> 
+SQL> COMMIT;
+Validation terminée.
+SQL> 
+SQL> -- Requête : la méthode presenter() est appelée sur le siège comme sur les sites
+SQL> -- (les sites l'ont héritée). TREAT lit l'attribut propre au sous-type t_site
+SQL> -- (vide pour le siège, qui n'est pas un t_site).
+SQL> COLUMN campus FORMAT A40
+SQL> COLUMN type_objet FORMAT A10
+SQL> SELECT c.id_campus,
+  2         c.presenter()                          AS campus,
+  3         CASE WHEN VALUE(c) IS OF (t_site) THEN 'T_SITE' ELSE 'T_CAMPUS' END AS type_objet,
+  4         TREAT(VALUE(c) AS t_site).id_siege     AS id_siege
+  5  FROM   campus_objet c
+  6  ORDER BY c.id_campus;
+
+ ID_CAMPUS CAMPUS                                   TYPE_OBJET   ID_SIEGE
+---------- ---------------------------------------- ---------- ----------
+         1 Siège (Paris)                            T_CAMPUS             
+         2 Site Bordeaux (Bordeaux)                 T_SITE              1
+         3 Site Tours (Tours)                       T_SITE              1
+         4 Site Angers (Angers)                     T_SITE              1
+
+SQL> 
+SQL> SPOOL OFF

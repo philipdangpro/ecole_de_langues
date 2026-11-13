@@ -82,24 +82,3 @@ Scripts lancés **à la main**, hors `run_all.sql` :
 | catégorie de ressource | langue de la session        | colonne `categorie` |
 
 Une opération est **valide** si sa session existe, si son montant est ≥ 0 et si sa date est ≤ au début de la session.
-
-#### Arborescence
-
-```
-.
-├── README.md                ce fichier
-├── JOURNAL.md               journal de bord daté (obligatoire)
-├── IA.md                    déclaration d'usage de l'IA (obligatoire)
-├── data/                    les 4 CSV d'origine — ne jamais les modifier
-├── sql/                     tous les scripts Oracle, lancés par run_all.sql
-├── nosql/                   MongoDB shardé (L6), Elasticsearch et Neo4j (L7)
-├── docs/
-│   ├── analyse/             premier aperçu des données et des défauts
-│   ├── comptes_rendus/      ce qui a été fait à chaque étape, et comment le justifier
-│   ├── L1_modele/           règles de gestion, MCD, schéma relationnel
-│   ├── L3_normalisation/    DF, décomposition, dénormalisation
-│   ├── L8_adr/              les deux ADR
-│   ├── sujet/               sujet complet du projet (.odt)
-│   └── rapport/             rapport final (12 pages max)
-└── preuves/                 sorties à garder : plans d'exécution, blocs lus, captures
-```
