@@ -1,0 +1,14 @@
+Projet Data Storage Systems · groupe 07 · École de langues
+Données FICTIVES générées pour votre groupe seulement (aucune personne réelle). Encodage UTF-8, séparateur virgule.
+
+campus.csv    le siège (id 1) et les trois sites : Bordeaux, Tours, Angers
+etudiants.csv    les usagers ; id_campus = site de rattachement
+sessions.csv  les ressources datées (une par session) : site, début, durée, capacité en places, prix unitaire
+inscriptions.csv   les opérations : usager, ressource, date de l'opération, nombre de places, montant, statut
+            (CONFIRMEE ou ANNULEE), id_groupe = opération groupée passée en une fois (vide sinon)
+
+Le site d'une opération est celui de sa ressource. Le pic de trafic de votre sujet : rentrée de septembre.
+
+Ces fichiers contiennent volontairement des défauts, comme des données réelles : à vous de les détecter,
+de décider comment votre modèle les traite (refus par une contrainte, correction, rejet tracé) et de le
+justifier. Les définitions des valeurs de contrôle sont dans le sujet du projet.

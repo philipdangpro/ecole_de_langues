@@ -13,8 +13,8 @@ SPOOL run_all.log
 @@00_nettoyage.sql
 @@01_creation_tables.sql
 @@02_chargement.sql
-@@03_valeurs_controle.sql
-@@04_requetes_metier.sql
+@@03_valeurs_controle.sql -- a enlever
+@@04_requetes_metier.sql -- a enlever
 @@05_normalisation.sql
 @@06_triggers.sql
 @@07_package_parcours.sql

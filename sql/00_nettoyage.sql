@@ -1,7 +1,5 @@
 -- =====================================================================
--- 00_nettoyage.sql
--- Livrable : tous
--- Rôle     : supprime tous les objets du schéma courant (langues) pour pouvoir
+-- Rôle     : ce fichier supprime tous les objets du schéma courant (langues) pour pouvoir
 --            relancer run_all.sql de zéro, sur une base neuve comme sur une base déjà remplie.
 -- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
 --
@@ -11,7 +9,7 @@
 -- =====================================================================
 
 BEGIN
-    FOR o IN (
+    FOR object IN (
         SELECT object_name, object_type
         FROM   user_objects
         WHERE  object_type IN ('MATERIALIZED VIEW', 'VIEW', 'TABLE', 'SEQUENCE',
@@ -24,13 +22,13 @@ BEGIN
                         'TYPE', 9, 5)
     ) LOOP
         BEGIN
-            EXECUTE IMMEDIATE 'DROP ' || o.object_type || ' "' || o.object_name || '"'
-                || CASE o.object_type
+            EXECUTE IMMEDIATE 'DROP ' || object.object_type || ' "' || object.object_name || '"'
+                || CASE object.object_type
                        WHEN 'TABLE' THEN ' CASCADE CONSTRAINTS PURGE'
                        WHEN 'TYPE'  THEN ' FORCE'
                    END;
         EXCEPTION
-            -- objet déjà supprimé par un DROP précédent (ex. table d'une vue matérialisée)
+            -- objet déjà supprimé par un DROP précédent
             WHEN OTHERS THEN
                 IF SQLCODE NOT IN (-942, -4043, -2289, -12003) THEN RAISE; END IF;
         END;

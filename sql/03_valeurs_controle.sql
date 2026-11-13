@@ -28,6 +28,14 @@ FROM ext_etudiants;
 -- Résultat : 21 544 lignes, 21 471 personnes (identique à C1 : la fusion est juste)
 
 
+-- ---------------------------------------------------------------------
+-- C2 : nombre d'opérations non valides, et leur répartition par motif
+-- ---------------------------------------------------------------------
+(select count(*) as c2 from inscription_rejet) -- 397 opérations non valides
+union
+(select motif, count(motif) as nb_motif from inscription_rejet group by motif); -- MONTANT_NEGATIF 80, DATE_APRES_DEBUT 97 et SESSION_INEXISTANTE 220
+
+
 
 -- ============================================================
 -- C3 : nombre d'operations valides confirmees
@@ -42,11 +50,6 @@ WHERE i.statut = 'CONFIRMEE'
 
 -- Resultat attendu : 326469
 
--- ---------------------------------------------------------------------
--- C2 : nombre d'opérations non valides, et leur répartition par motif
--- ---------------------------------------------------------------------
-select count(*) from inscription_rejet; -- 397
-select motif, count(motif) as nb_motif from inscription_rejet group by motif; -- neg 80, apres_deb 97, no sess 220
 
 
 
@@ -68,9 +71,10 @@ FETCH FIRST 1 ROWS ONLY;
 -- ---------------------------------------------------------------------
 -- C5	chiffre d'affaires de chaque site (somme des montants des opérations valides confirmées)
 -- ---------------------------------------------------------------------
-select sum(montant), id_site from inscription i
---left join site s on s.id = i.id_site
-where statut = 'CONFIRMEE' group by i.id_site;
+select sum(montant) as chiffre_d_affaires, campus.nom as nom, id_site from inscription
+join site on site.id_campus = inscription.id_site
+join campus on site.ID_CAMPUS = campus.id_campus
+where statut = 'CONFIRMEE' group by id_campus;
 -- 27333192	2
 -- 39082945	4
 -- 56080982	3

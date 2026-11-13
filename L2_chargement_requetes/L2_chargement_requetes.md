@@ -13,14 +13,14 @@ La requête retourne **12 356 personnes**. Pour chaque étudiant, les opération
 Les résultats obtenus sont les suivants :
 
 | Catégorie | Places confirmées |
-|---|---:|
-| FLE | 55 104 |
-| Allemand | 52 705 |
-| Anglais | 54 870 |
-| Chinois | 54 681 |
-| Espagnol | 54 579 |
-| Italien | 54 530 |
-| **Total** | **326 469** |
+| --------- | ----------------: |
+| FLE       |            55 104 |
+| Allemand  |            52 705 |
+| Anglais   |            54 870 |
+| Chinois   |            54 681 |
+| Espagnol  |            54 579 |
+| Italien   |            54 530 |
+| **Total** |       **326 469** |
 
 La requête joint les inscriptions aux sessions et aux catégories, filtre les opérations valides confirmées, puis additionne le nombre de places par catégorie. Dans ce jeu de données, chaque inscription représentant une place, le total de C9 correspond au nombre d'opérations comptées en C3.
 
