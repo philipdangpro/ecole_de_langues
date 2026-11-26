@@ -28,7 +28,7 @@ Statut : accepté le 31/10/2026. Responsable : Baptiste.
 | Coût | ++ (rien à installer) | + (dans Oracle) | − (un moteur de plus, un export) | ++ |
 | Sécurité, chiffrement | ++ (VPD du L5) | ++ | − (copie des noms ; sécurité coupée dans le kit, TLS à activer) | ++ |
 
-## 4. Mesures (preuves/L7_elasticsearch.txt, nosql/elasticsearch/L7_oracle_comparaison.sql)
+## 4. Mesures (preuves/L7_elasticsearch.txt, L7_nosql/elasticsearch/L7_oracle_comparaison.sql)
 
 - Oracle, `=` et `LIKE '%BETRAND%'` : 0 résultat.
 - Oracle, `UTL_MATCH` : 49 lignes, dont les 15 Léo Bertrand, en 0,08 s. Plan : `TABLE ACCESS FULL`.
@@ -60,4 +60,4 @@ Nous choisissons C. Seul Elasticsearch classe les bonnes réponses en tête, et 
 
 ## 8. Liens
 
-L7 (`nosql/elasticsearch/`), ADR-01 (localisation de l'étudiant), L5 (VPD).
+L7 (`L7_nosql/elasticsearch/`), ADR-01 (localisation de l'étudiant), L5 (VPD).

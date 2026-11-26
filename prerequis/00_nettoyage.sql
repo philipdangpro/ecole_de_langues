@@ -1,7 +1,7 @@
 -- =====================================================================
 -- Rôle     : ce fichier supprime tous les objets du schéma courant (langues) pour pouvoir
 --            relancer run_all.sql de zéro, sur une base neuve comme sur une base déjà remplie.
--- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+-- Lancé par : prerequis/run_all.sql (ne pas changer l'ordre sans prévenir)
 --
 -- On parcourt le dictionnaire (USER_OBJECTS) plutôt que d'écrire une liste de DROP :
 -- un objet ajouté plus tard par un autre livrable sera supprimé lui aussi, sans

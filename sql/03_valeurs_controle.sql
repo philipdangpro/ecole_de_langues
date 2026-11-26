@@ -3,7 +3,7 @@
 -- Livrable : L2 · Valeurs de contrôle
 -- Responsable : à définir
 -- Attendu  : une requête par valeur C1 à C9, avec le résultat obtenu en commentaire
--- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+-- Lancé par : prerequis/run_all.sql (ne pas changer l'ordre sans prévenir)
 --
 -- Rappel : INSCRIPTION ne contient que les opérations valides (les autres sont dans
 -- INSCRIPTION_REJET, voir 02_chargement.sql). Pas besoin de refiltrer pour C3 à C9.
@@ -30,10 +30,17 @@ FROM ext_etudiants;
 
 -- ---------------------------------------------------------------------
 -- C2 : nombre d'opérations non valides, et leur répartition par motif
+--    Les opérations non valides sont dans INSCRIPTION_REJET, avec leur motif
+--    (02_chargement.sql). ROLLUP ajoute une ligne de total sous le détail par motif.
+--    Chaque opération n'a qu'un motif : aucune n'a deux défauts à la fois (vérifié sur le CSV).
 -- ---------------------------------------------------------------------
-(select count(*) as c2 from inscription_rejet) -- 397 opérations non valides
-union
-(select motif, count(motif) as nb_motif from inscription_rejet group by motif); -- MONTANT_NEGATIF 80, DATE_APRES_DEBUT 97 et SESSION_INEXISTANTE 220
+--    Alias différent du nom de colonne : sinon ORDER BY motif vise l'alias (ORA-00979).
+SELECT NVL(motif, 'TOTAL (C2)') AS motif_rejet, COUNT(*) AS nb
+FROM inscription_rejet
+GROUP BY ROLLUP (motif)
+ORDER BY GROUPING(motif), motif_rejet;
+-- Résultat : DATE_APRES_DEBUT 97, MONTANT_NEGATIF 80, SESSION_INEXISTANTE 220
+--            TOTAL 397 opérations non valides
 
 
 
@@ -70,14 +77,17 @@ FETCH FIRST 1 ROWS ONLY;
 
 -- ---------------------------------------------------------------------
 -- C5	chiffre d'affaires de chaque site (somme des montants des opérations valides confirmées)
+--    Le site d'une opération est celui de sa session : on passe par SESSION_COURS
+--    (la colonne INSCRIPTION.id_site n'existe qu'après 05_normalisation.sql).
 -- ---------------------------------------------------------------------
-select sum(montant) as chiffre_d_affaires, campus.nom as nom, id_site from inscription
-join site on site.id_campus = inscription.id_site
-join campus on site.ID_CAMPUS = campus.id_campus
-where statut = 'CONFIRMEE' group by id_campus;
--- 27333192	2
--- 39082945	4
--- 56080982	3
+SELECT s.id_campus AS id_site, c.nom AS site, SUM(i.montant) AS chiffre_affaires
+FROM inscription i
+JOIN session_cours s ON s.id_session = i.id_session
+JOIN campus c        ON c.id_campus  = s.id_campus
+WHERE i.statut = 'CONFIRMEE'
+GROUP BY s.id_campus, c.nom
+ORDER BY s.id_campus;
+-- Résultat : Bordeaux (2) 27 333 192 ; Tours (3) 56 080 982 ; Angers (4) 39 082 945
 
 -- ============================================================
 -- C6 : personnes ayant des operations valides
@@ -118,11 +128,19 @@ FROM (
 
 -------------------------------------------------------------------------
 -- C8 nombre d'opérations groupées (même id_groupe) dont les opérations valides engagent au moins deux sites
+--    Toutes les opérations valides comptent (confirmées et annulées), comme le dit la
+--    définition. Le site vient de la session (id_site n'existe pas encore à cette étape).
 -------------------------------------------------------------------------
-select count(*) from (
-select id_groupe 
-from inscription where id_groupe is not null and statut = 'CONFIRMEE'
-group by id_groupe having count(distinct(id_site)) >= 2);
+SELECT COUNT(*) AS c8
+FROM (
+    SELECT i.id_groupe
+    FROM inscription i
+    JOIN session_cours s ON s.id_session = i.id_session
+    WHERE i.id_groupe IS NOT NULL
+    GROUP BY i.id_groupe
+    HAVING COUNT(DISTINCT s.id_campus) >= 2
+);
+-- Résultat : 1 874 parcours multi-sites (sur 2 667 parcours)
 
 
 

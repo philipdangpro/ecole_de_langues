@@ -8,7 +8,7 @@
 // Sortie de référence : preuves/L6_mongodb.txt
 //
 // Clé retenue : { id_etudiant: "hashed" } pour la collection langues.inscriptions.
-// Justification (mesures de L6_mesures.js, détail dans docs/L6_distribution/) :
+// Justification (mesures de L6_mesures.js, détail dans L6_distribution/) :
 //   - id_site : 3 valeurs, Tours = 45,9 % des données -> déséquilibre (prouvé ici avec
 //     la collection de comparaison inscriptions_par_site) ;
 //   - date_operation : croissante, le 10/09/2026 concentre 16 068 opérations (4,5 % du

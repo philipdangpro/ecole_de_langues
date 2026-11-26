@@ -1,6 +1,6 @@
 # MongoDB shardé — L6
 
-Responsable : Baptiste (avec Claude Code). Explications et choix : `docs/L6_distribution/L6_distribution.md`.
+Responsable : Baptiste (avec Claude Code). Explications et choix : `L6_distribution/L6_distribution.md`.
 Sortie de référence de toutes les étapes : `preuves/L6_mongodb.txt`.
 
 ## Ce qu'il y a ici
@@ -19,13 +19,13 @@ Prérequis : Oracle chargé (`run_all.sql`) et le cluster du kit démarré et in
 
 ```powershell
 # 1. Export depuis Oracle (fichier /tmp/inscriptions_mongo.csv dans le conteneur Oracle)
-docker cp nosql/mongodb/L6_export_oracle.sql oracle-bdd:/tmp/L6_export_oracle.sql
+docker cp L7_nosql/mongodb/L6_export_oracle.sql oracle-bdd:/tmp/L6_export_oracle.sql
 docker exec oracle-bdd sqlplus -s langues/langues@//localhost:1521/FREEPDB1 "@/tmp/L6_export_oracle.sql"
 
 # 2. Copie vers le routeur MongoDB (en passant par la machine)
 docker cp oracle-bdd:/tmp/inscriptions_mongo.csv $env:TEMP/inscriptions_mongo.csv
 docker cp $env:TEMP/inscriptions_mongo.csv mongos:/tmp/inscriptions_mongo.csv
-docker cp nosql/mongodb/. mongos:/tmp/
+docker cp L7_nosql/mongodb/. mongos:/tmp/
 
 # 3. Import dans une collection non shardée (la 1re ligne du CSV donne les types)
 docker exec mongos mongoimport --db langues --collection inscriptions_import --drop --type csv --headerline --columnsHaveTypes --ignoreBlanks --file /tmp/inscriptions_mongo.csv

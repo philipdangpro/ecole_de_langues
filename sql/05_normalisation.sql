@@ -3,8 +3,8 @@
 -- Livrable : L3 · Normalisation
 -- Responsable : Younes (analyse de départ, en Python), Baptiste (reprise en SQL)
 -- Attendu  : table des opérations à plat + dépendances fonctionnelles + décomposition
---            + dénormalisation assumée. Explications : docs/L3_normalisation/L3_normalisation.md
--- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+--            + dénormalisation assumée. Explications : L3_normalisation/L3_normalisation.md
+-- Lancé par : prerequis/run_all.sql (ne pas changer l'ordre sans prévenir)
 --
 -- Plan :
 --   1. OPERATION_A_PLAT : une ligne par opération du CSV, avec son étudiant, sa session et
@@ -293,7 +293,7 @@ FROM dual;
 --    En 3NF, le site d'une opération se déduit par jointure (RG10, vue V_INSCRIPTION_SITE).
 --    On le recopie dans INSCRIPTION.id_site, car C5, C6, C8 et la répartition des données
 --    par site (L5, L6) en ont besoin sans passer par SESSION_COURS. Justification et
---    mesures : docs/L3_normalisation/L3_normalisation.md.
+--    mesures : L3_normalisation/L3_normalisation.md.
 --
 --    Cohérence garantie de deux façons :
 --    - la clé étrangère composite (id_session, id_site) -> SESSION_COURS (id_session,

@@ -242,3 +242,6 @@ preuves/L1_tests_contraintes.txt
 env/
 
 ecole_de_langues.code-workspace
+
+# notes de travail locales (comptes rendus, suivi, cours) : hors rendu
+/docs/

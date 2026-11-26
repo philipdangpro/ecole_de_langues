@@ -18,58 +18,78 @@ Les livrables sont rangés par dossier. Chaque dossier contient les fichiers cor
 
 ## Initialisation du projet
 
-Avant tout chose, vous devez créer le schéma du projet, les users et charger les données. Pour cela il faut jouer les scripts du dossier initialisation : installation_system.sql et run_all.sql
+Avant toute chose, il faut créer les comptes Oracle et charger les données : `prerequis/installation_system.sql` (une fois, en `system`), puis `prerequis/run_all.sql` (en `langues`). Testé sur un kit neuf le 26/11/2026 : environ 1 min, aucune erreur.
 
-Pour créer le schéma et les données, veuillez suivre les actions suivantes :
+Commandes PowerShell, depuis la racine du dépôt (sous Git Bash, préfixer chaque commande `docker` par `MSYS_NO_PATHCONV=1`) :
 
 ```powershell
 # 1. copier les CSV dans le conteneur
 docker exec oracle-bdd mkdir -p /opt/oracle/donnees_langues
 docker cp data/. oracle-bdd:/opt/oracle/donnees_langues/
 
-# 2. créer l'utilisateur langues, ses droits, le dossier Oracle, les 3 comptes de test
-#    du L5 (agent_bordeaux, agent_tours, direction) et les 3 bases de site du L6
-#    (site_bordeaux, site_tours, site_angers), avec le compte administrateur du kit
+# 2. en system : utilisateur langues et ses droits, DIRECTORY des CSV, 3 comptes de test
+#    du L5 (agent_bordeaux, agent_tours, direction), 3 comptes de site du L6
+#    (site_bordeaux, site_tours, site_angers)
 docker cp prerequis/installation_system.sql oracle-bdd:/tmp/installation_system.sql
 docker exec oracle-bdd sqlplus -s system/oracle@//localhost:1521/FREEPDB1 "@/tmp/installation_system.sql"
 
-# 3. créer l'utilisateur langues, ses droits, le dossier Oracle, les 3 comptes de test
-se connecter en tant que system/oracle
-exécuter prerequis/installation_system.sql
-se connecter en tant que langues/langues
-exécuter prerequis/run_all.sql
+# 3. en langues : reconstruction complète (L1 à L6 + bonus). Le dépôt entier est copié,
+#    car run_all.sql appelle les scripts des autres dossiers par chemins relatifs.
+docker exec oracle-bdd mkdir -p /tmp/projet
+docker cp . oracle-bdd:/tmp/projet/
+docker exec -w /tmp/projet/prerequis oracle-bdd sqlplus -s langues/langues@//localhost:1521/FREEPDB1 "@run_all.sql"
+# journal : /tmp/projet/prerequis/run_all.log dans le conteneur
 ```
+
+Ou dans SQL Developer : connexion `system` → ouvrir `prerequis/installation_system.sql` → F5 ; puis connexion `langues` → ouvrir `prerequis/run_all.sql` → F5.
 
 ## Ordre d'exécution des scripts Oracle
 
-Tout se relance de zéro avec un seul fichier, connecté en **`langues` / `langues`**, service `FREEPDB1` :
+Tout se relance de zéro avec un seul fichier, `prerequis/run_all.sql`, connecté en **`langues` / `langues`**, service `FREEPDB1`. Les chemins sont relatifs au dossier `prerequis/`.
 
-- dans SQL Developer : Exécuter `sql/run_all.sql`
-- ou en ligne de commande, depuis le dossier `sql/` : `sqlplus langues/langues@//localhost:1521/FREEPDB1 @run_all.sql`
+| Ordre | Script                                            | Livrable                                                                            |
+| ----- | ------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| 00    | `prerequis/00_nettoyage.sql`                      | supprime tout pour repartir de zéro                                                 |
+| 01    | `L1_modele/01_creation_tables.sql`                | L1 · tables et contraintes nommées                                                  |
+| 02    | `L2_chargement_requetes/02_chargement.sql`        | L2 · chargement des CSV et traitement des défauts                                   |
+| 03    | `sql/03_valeurs_controle.sql`                     | L2 · valeurs C1 à C9                                                                |
+| 04    | `sql/04_requetes_metier.sql`                      | L2 · 10 requêtes métier                                                             |
+| 05    | `sql/05_normalisation.sql`                        | L3 · table à plat, DF, décomposition, dénormalisation                               |
+| 06    | `sql/06_triggers.sql`                             | L4 · triggers et journal d'audit                                                    |
+| 07    | `sql/07_package_parcours.sql`                     | L4 · parcours multi-sites tout ou rien                                              |
+| 08    | `sql/08_performance.sql`                          | L5 · requêtes lentes, index, vue matérialisée                                       |
+| 09    | `sql/09_securite.sql`                             | L5 · rôles, vues de restriction, sécurité par ligne (VPD)                           |
+| 10    | `sql/10_distribution.sql`                         | L6 · fragmentation par site, liens, vues globales                                   |
+| 11    | `sql/11_bonus_objet.sql`                          | bonus objet-relationnel : type `t_campus` avec méthode, sous-type `t_site`, requête |
 
-| Ordre | Script                    | Livrable                                                                            |
-| ----- | ------------------------- | ----------------------------------------------------------------------------------- |
-| 00    | `00_nettoyage.sql`        | supprime tout pour repartir de zéro                                                 |
-| 01    | `01_creation_tables.sql`  | L1 · tables et contraintes nommées                                                  |
-| 02    | `02_chargement.sql`       | L2 · chargement des CSV et traitement des défauts                                   |
-| 03    | `03_valeurs_controle.sql` | L2 · valeurs C1 à C9                                                                |
-| 04    | `04_requetes_metier.sql`  | L2 · 10 requêtes métier                                                             |
-| 05    | `05_normalisation.sql`    | L3 · table à plat et dénormalisation                                                |
-| 06    | `06_triggers.sql`         | L4 · triggers et journal d'audit                                                    |
-| 07    | `07_package_parcours.sql` | L4 · parcours multi-sites tout ou rien                                              |
-| 08    | `08_performance.sql`      | L5 · requêtes lentes, index, vue matérialisée                                       |
-| 09    | `09_securite.sql`         | L5 · rôle, vue de restriction, VPD / masquage / audit                               |
-| 10    | `10_distribution.sql`     | L6 · fragmentation par site, db links, vues globales                                |
-| 11    | `11_bonus_objet.sql`      | bonus objet-relationnel : type `t_campus` avec méthode, sous-type `t_site`, requête |
+Scripts lancés **à la main**, après `run_all.sql` :
 
-Scripts lancés **à la main**, hors `run_all.sql` :
+| Script | Livrable | Connexion | Résultat de référence |
+| --- | --- | --- | --- |
+| `L3_normalisation/L3_denormalisation.sql` | L3 · tests de la dénormalisation | `langues` | `preuves/L3_denormalisation.txt` |
+| `L4_fiabilite/L4_tests_fiabilite.sql` | L4 · 14 tests des triggers et du package | `langues` | `preuves/L4_tests_fiabilite.txt` |
+| `sql/L4_concurrence_session_A.sql` + `_B.sql` | L4 · anomalie de concurrence | deux connexions `langues` ouvertes en même temps (feuille non partagée), étapes en alternance | `preuves/L4_concurrence.txt` |
+| `L5_perf_et_securite/L5_securite.sql` | L5 · ce que voit chaque compte | se connecte tour à tour avec `agent_bordeaux`, `agent_tours`, `direction` | `preuves/L5_securite.txt` |
+| `sql/L6_panne_reprise.sql` | L6 · panne d'Angers et reprise | `langues`, sauf étapes 2 et 4 en `system` | `preuves/L6_panne_reprise.txt` (18 OK) |
+| `L7_nosql/mongodb/` | L6 · collection MongoDB shardée | voir `L7_nosql/mongodb/README.md` | `preuves/L6_mongodb.txt` |
+| `L7_nosql/elasticsearch/` | L7 · recherche d'un étudiant | voir `L7_nosql/elasticsearch/README.md` | `preuves/L7_elasticsearch.txt` |
+| `L7_nosql/neo4j/` | L7 · recommandation de sessions | voir `L7_nosql/neo4j/README.md` | `preuves/L7_neo4j.txt` |
 
-- `installation_system.sql` : une seule fois, en `system`, avant tout le reste (voir plus haut).
-- `L4_concurrence_session_A.sql` et `L4_concurrence_session_B.sql` : anomalie de concurrence, deux connexions ouvertes en même temps.
-- Preuves, après `run_all.sql` : `preuves/L4_tests_fiabilite.sql` (triggers et package), `preuves/L5_securite.sql` (ce que voit chaque compte ; il se connecte tour à tour avec `agent_bordeaux`, `agent_tours` et `direction`).
-- `L6_panne_reprise.sql` : panne du site d'Angers et reprise, étape par étape, en alternant les connexions `langues` et `system`.
-- MongoDB shardé (L6) : export depuis Oracle puis scripts `mongosh`, voir `nosql/mongodb/README.md`.
-- L7 : Elasticsearch (recherche d'un étudiant, `nosql/elasticsearch/README.md`) et Neo4j (recommandation de sessions, `nosql/neo4j/README.md`). Chacun part d'un export d'Oracle. Le kit demande de lancer un moteur à la fois (`docker compose --profile elasticsearch up -d`, puis `--profile neo4j`, dans `C:\bdd-kit\3-nosql`).
+Le kit demande de lancer un moteur NoSQL à la fois (`docker compose --profile elasticsearch up -d`, puis `--profile neo4j`, dans `C:\bdd-kit\3-nosql`).
+
+## Où trouver chaque livrable
+
+| Livrable | Documents |
+| --- | --- |
+| L1 | `L1_modele/L1_modele.md` (16 règles de gestion, E/A, relationnel), `L1_modele/L1_schema_relationnel.md`, `L1_modele/modele E_A.png` |
+| L2 | `L2_chargement_requetes/L2_chargement_requetes.md`, `sql/03_valeurs_controle.sql`, `sql/04_requetes_metier.sql` |
+| L3 | `L3_normalisation/L3_normalisation.md` (version SQL, rejouable) ; exploration Python initiale dans le même dossier |
+| L4 | `sql/06_triggers.sql`, `sql/07_package_parcours.sql`, `L4_fiabilite/` |
+| L5 | `sql/08_performance.sql`, `sql/09_securite.sql`, `L5_perf_et_securite/` |
+| L6 | `L6_distribution/L6_distribution.md` (mesures, panne, MongoDB, CAP / PACELC, RGPD) |
+| L7 | `L7_nosql/` |
+| L8 | `L8_adr/ADR-01.md`, `L8_adr/ADR-02.md`, `L8_adr/options_ADR.md` |
+| Rapport | `RAPPORT.md` |
 
 ## Vocabulaire du sujet → nos données
 

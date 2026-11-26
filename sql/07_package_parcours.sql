@@ -3,7 +3,7 @@
 -- Livrable : L4 · Fiabilité
 -- Responsable : Baptiste (avec Claude Code)
 -- Attendu  : package : procédure du parcours multi-sites, tout ou rien, qui refuse la sur-réservation
--- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+-- Lancé par : prerequis/run_all.sql (ne pas changer l'ordre sans prévenir)
 --
 -- Le parcours (opération groupée, RG16) : un étudiant s'inscrit en une fois à plusieurs
 -- sessions, souvent dans plusieurs sites. Toutes les inscriptions partagent un id_groupe.
@@ -22,7 +22,7 @@
 --   - en cas de succès : les inscriptions sont posées, l'appelant fait COMMIT ;
 --   - en cas d'erreur  : ROLLBACK TO SAVEPOINT, la base revient à l'état d'avant l'appel
 --     (même les inscriptions déjà posées dans la boucle), puis l'erreur est renvoyée.
--- Tests : preuves/L4_tests_fiabilite.sql. Concurrence : sql/L4_concurrence_session_A/B.sql
+-- Tests : L4_fiabilite/L4_tests_fiabilite.sql. Concurrence : sql/L4_concurrence_session_A/B.sql
 -- =====================================================================
 
 

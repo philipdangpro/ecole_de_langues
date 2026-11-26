@@ -3,7 +3,7 @@
 -- Livrable : Bonus objet-relationnel
 -- Responsable : Baptiste (avec Claude Code)
 -- Attendu  : type objet avec héritage et méthode, utilisé dans une requête
--- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+-- Lancé par : prerequis/run_all.sql (ne pas changer l'ordre sans prévenir)
 --
 -- On reprend l'héritage déjà présent dans le modèle (L1) : un CAMPUS est soit
 -- le siège, soit un site. Ici il est écrit en types objet :

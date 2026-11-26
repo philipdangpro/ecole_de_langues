@@ -19,20 +19,20 @@ Prérequis : Oracle chargé (`run_all.sql`) et Neo4j du kit démarré
 
 ```powershell
 # 1. Export depuis Oracle (fichier /tmp/graphe_neo4j.cypher dans le conteneur Oracle)
-docker cp nosql/neo4j/L7_export_graphe.sql oracle-bdd:/tmp/L7_export_graphe.sql
+docker cp L7_nosql/neo4j/L7_export_graphe.sql oracle-bdd:/tmp/L7_export_graphe.sql
 docker exec oracle-bdd sqlplus -s langues/langues@//localhost:1521/FREEPDB1 "@/tmp/L7_export_graphe.sql"
 
 # 2. Copie vers Neo4j (en passant par la machine)
 docker cp oracle-bdd:/tmp/graphe_neo4j.cypher $env:TEMP/graphe_neo4j.cypher
 docker cp $env:TEMP/graphe_neo4j.cypher neo4j:/tmp/graphe_neo4j.cypher
-docker cp nosql/neo4j/L7_recommandation.cypher neo4j:/tmp/L7_recommandation.cypher
+docker cp L7_nosql/neo4j/L7_recommandation.cypher neo4j:/tmp/L7_recommandation.cypher
 
 # 3. Import (de 30 s à 2 min 30), puis recommandation et mesure
 docker exec neo4j cypher-shell -f /tmp/graphe_neo4j.cypher
 docker exec neo4j cypher-shell --format verbose -f /tmp/L7_recommandation.cypher
 
 # 4. La même recommandation dans Oracle, pour comparer
-docker cp nosql/neo4j/L7_oracle_comparaison.sql oracle-bdd:/tmp/L7_oracle_comparaison.sql
+docker cp L7_nosql/neo4j/L7_oracle_comparaison.sql oracle-bdd:/tmp/L7_oracle_comparaison.sql
 docker exec oracle-bdd sqlplus -s langues/langues@//localhost:1521/FREEPDB1 "@/tmp/L7_oracle_comparaison.sql"
 ```
 
