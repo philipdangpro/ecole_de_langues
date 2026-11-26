@@ -3,12 +3,12 @@
 -- Livrable : L6 · Distribution
 -- Responsable : Baptiste (avec Claude Code)
 -- Attendu  : fragmentation par site (schémas, db links, vues globales)
--- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+-- Lancé par : prerequis/run_all.sql (ne pas changer l'ordre sans prévenir)
 --
 -- Prérequis : installation_system.sql relancé en system (comptes site_bordeaux,
 -- site_tours, site_angers, créés pour le L6).
 --
--- Architecture (explications : docs/L6_distribution/L6_distribution.md) :
+-- Architecture (explications : L6_distribution/L6_distribution.md) :
 --   - langues = le SIÈGE. Il garde le catalogue de répartition, les liens vers les
 --     sites, les vues globales et les procédures réparties.
 --   - site_bordeaux, site_tours, site_angers = la base locale de chaque SITE. Dans la

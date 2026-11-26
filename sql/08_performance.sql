@@ -3,7 +3,7 @@
 -- Livrable : L5 · Performance
 -- Responsable : Baptiste (avec Claude Code)
 -- Attendu  : 3 requêtes lentes : plan + blocs lus avant/après ; vue matérialisée ou partitionnement
--- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+-- Lancé par : prerequis/run_all.sql (ne pas changer l'ordre sans prévenir)
 --
 -- Trois requêtes que l'école lance souvent, toutes lentes sur nos 354 458 inscriptions,
 -- car elles parcourent toute la table INSCRIPTION (2 304 blocs) :

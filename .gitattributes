@@ -1,0 +1,7 @@
+# Scripts exécutés dans les conteneurs Linux (bash, mongosh, cypher-shell, sqlplus) :
+# toujours en fins de ligne LF, même si le dépôt est cloné sous Windows
+# (core.autocrlf=true convertit sinon en CRLF et bash échoue : $'\r': command not found).
+*.sh     text eol=lf
+*.js     text eol=lf
+*.cypher text eol=lf
+*.sql    text eol=lf

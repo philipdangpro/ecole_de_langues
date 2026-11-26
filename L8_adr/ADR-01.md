@@ -62,4 +62,4 @@ Nous choisissons B. La session décide du site : une inscription reste avec sa s
 
 ## 8. Liens
 
-L3 (colonne `id_site`), L4 (parcours tout ou rien), L6 (`sql/10_distribution.sql`, `docs/L6_distribution/L6_distribution.md`), ADR-02.
+L3 (colonne `id_site`), L4 (parcours tout ou rien), L6 (`sql/10_distribution.sql`, `L6_distribution/L6_distribution.md`), ADR-02.

@@ -30,10 +30,9 @@ COMMIT;
 -- =====================================================================
 -- PARTIE 2 : LA CORRECTION
 -- =====================================================================
-VARIABLE g VARCHAR2(10)
-
 -- ÉTAPE 8 (B) : B demande un parcours sur les mêmes sessions.
 -- B se bloque sur le SELECT ... FOR UPDATE du package : A tient le verrou.
+VARIABLE g VARCHAR2(10)
 EXEC pkg_parcours.inscrire_parcours(2, t_liste_sessions(900001, 900002), p_date_operation => DATE '2027-01-10', p_id_groupe => :g)
 -- Résultat, dès que A fait COMMIT (étape 9) :
 --   ORA-20010: Session 900001 : 0 place(s) libre(s) sur 1, 1 demandée(s) : parcours refusé,

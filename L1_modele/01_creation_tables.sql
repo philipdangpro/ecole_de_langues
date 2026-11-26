@@ -2,9 +2,9 @@
 -- 01_creation_tables.sql
 -- Livrable : L1 · Modèle
 -- Rôle     : crée les 7 tables du modèle et 2 vues, avec toutes les contraintes nommées.
---            Modèle et règles de gestion (RG1 à RG16) : docs/L1_modele/L1_modele.md
---            Description colonne par colonne : docs/L1_modele/L1_schema_relationnel.md
--- Lancé par : sql/run_all.sql (après 00_nettoyage.sql)
+--            Modèle et règles de gestion (RG1 à RG16) : L1_modele/L1_modele.md
+--            Description colonne par colonne : L1_modele/L1_schema_relationnel.md
+-- Lancé par : prerequis/run_all.sql (après 00_nettoyage.sql)
 --
 -- Convention de nommage des contraintes :
 --   pk_<table>             clé primaire

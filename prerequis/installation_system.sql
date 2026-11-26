@@ -16,7 +16,7 @@
 --   2. ce script, connecté en system à FREEPDB1 :
 --      SQL Developer : connexion system/oracle, service FREEPDB1, F5
 --      ou (PowerShell) :
---        docker cp sql/installation_system.sql oracle-bdd:/tmp/installation_system.sql
+--        docker cp prerequis/installation_system.sql oracle-bdd:/tmp/installation_system.sql
 --        docker exec oracle-bdd sqlplus -s system/oracle@//localhost:1521/FREEPDB1 "@/tmp/installation_system.sql"
 --   3. run_all.sql, connecté en langues/langues (voir README).
 --

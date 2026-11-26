@@ -2,9 +2,9 @@
 -- 02_chargement.sql
 -- Livrable : L2 · Chargement
 -- Attendu  : chargement des 4 CSV de data/ avec traitement des défauts (correction, rejet tracé, signalement)
--- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+-- Lancé par : prerequis/run_all.sql (ne pas changer l'ordre sans prévenir)
 --
--- Prérequis : sql/installation_system.sql a été lancé une fois (DIRECTORY dir_donnees_langues
+-- Prérequis : prerequis/installation_system.sql a été lancé une fois (DIRECTORY dir_donnees_langues
 -- qui pointe vers les CSV copiés dans le conteneur, voir README).
 --
 -- Méthode : chaque CSV est lu par une TABLE EXTERNE (le fichier reste sur le disque, Oracle le

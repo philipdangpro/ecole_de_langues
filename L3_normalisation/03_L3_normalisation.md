@@ -11,8 +11,8 @@ Le L3 de Younes, écrit en Python, est refait en SQL dans `sql/05_normalisation.
 | Fichier | Rôle | Pour qui |
 |---|---|---|
 | `sql/05_normalisation.sql` | Le livrable, relancé par l'enseignante | Enseignante |
-| `docs/L3_normalisation/L3_normalisation.md` | Explication complète, à reprendre dans le rapport | Groupe, rapport |
-| `preuves/L3_denormalisation.sql` / `.txt` | Mesures et tests de la dénormalisation (hors `run_all`) | Rapport, oral |
+| `L3_normalisation/L3_normalisation.md` | Explication complète, à reprendre dans le rapport | Groupe, rapport |
+| `L3_normalisation/L3_denormalisation.sql` / `.txt` | Mesures et tests de la dénormalisation (hors `run_all`) | Rapport, oral |
 | Ce fichier | Ce que j'ai fait, et ce que je dois savoir expliquer | Toi |
 | `.gitignore` | Ajout de `scripts/**/*.csv` : plus de CSV générés dans Git | Groupe |
 
@@ -75,9 +75,9 @@ Le L3 de Younes, écrit en Python, est refait en SQL dans `sql/05_normalisation.
 
 ## Comment vérifier
 
-1. SQL Developer, connexion `langues` : `sql/run_all.sql`, F5. La reconstruction complète prend environ 50 secondes ; c'est la table à plat de 88 Mo qui prend le plus de temps.
+1. SQL Developer, connexion `langues` : `prerequis/run_all.sql`, F5. La reconstruction complète prend environ 50 secondes ; c'est la table à plat de 88 Mo qui prend le plus de temps.
 2. Les résultats du L3 s'affichent à la fin du journal d'exécution : les tableaux D1 à D9, N1 à N4, puis la vérification sans perte.
-3. Preuves de la dénormalisation : lancer `preuves/L3_denormalisation.sql` en sqlplus, ou lire `preuves/L3_denormalisation.txt`. Les tests sont annulés à la fin (`ROLLBACK`).
+3. Preuves de la dénormalisation : lancer `L3_normalisation/L3_denormalisation.sql` en sqlplus, ou lire `preuves/L3_denormalisation.txt`. Les tests sont annulés à la fin (`ROLLBACK`).
 
 ## Problèmes rencontrés pendant le travail
 
@@ -91,7 +91,7 @@ Le L3 de Younes, écrit en Python, est refait en SQL dans `sql/05_normalisation.
 ## Ce qu'il faut faire avec la branche `younes`
 
 - **Ne pas la fusionner telle quelle.** Elle ferait entrer 165 Mo de CSV dans l'historique de `main`, définitivement.
-- Le contenu utile est repris dans `docs/L3_normalisation/L3_normalisation.md`, qui le crédite.
+- Le contenu utile est repris dans `L3_normalisation/L3_normalisation.md`, qui le crédite.
 - **Attention à la note « dépôt alimenté par chaque membre ».** Younes doit avoir des commits à lui dans `main`. Proposition : il crée une nouvelle branche depuis `main`, relit et complète la doc du L3, et reporte `date_operation` sur le MCD, ce qui était déjà prévu. Puis il fait sa propre Pull Request.
 - Pour information : son `requirements.txt` est encodé en UTF-16. C'est l'effet de `pip freeze > requirements.txt` sous PowerShell. Sans Python dans le projet, ce fichier n'a plus de raison d'être.
 

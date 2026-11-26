@@ -3,7 +3,7 @@
 -- Livrable : L4 · Fiabilité
 -- Responsable : Baptiste (avec Claude Code)
 -- Attendu  : au moins 2 triggers, dont un journal d'audit
--- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+-- Lancé par : prerequis/run_all.sql (ne pas changer l'ordre sans prévenir)
 --
 -- Contenu :
 --   1. AUDIT_INSCRIPTION + trigger TRG_INSCRIPTION_AUDIT   : journal d'audit des opérations
@@ -20,7 +20,7 @@
 --   -20001 session inexistante (L3)     -20002 inscription avant la création du compte (RG14)
 --   -20003 inscription après le début   -20004 étudiant déjà inscrit en confirmé (RG13)
 --   -20005 parrain plus récent (RG7)    -20010 à -20019 : package du parcours (07)
--- Tests : preuves/L4_tests_fiabilite.sql
+-- Tests : L4_fiabilite/L4_tests_fiabilite.sql
 -- =====================================================================
 
 

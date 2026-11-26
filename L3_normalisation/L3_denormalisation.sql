@@ -1,5 +1,5 @@
 -- =====================================================================
--- preuves/L3_denormalisation.sql
+-- L3_normalisation/L3_denormalisation.sql
 -- Preuves de la dénormalisation du L3 (INSCRIPTION.id_site). Hors run_all.sql.
 -- À lancer en sqlplus, compte langues, APRÈS run_all.sql :
 --   sqlplus langues/langues@//localhost:1521/FREEPDB1 @L3_denormalisation.sql

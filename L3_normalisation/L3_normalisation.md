@@ -2,7 +2,7 @@
 
 Responsables : Younes (première analyse), Baptiste (reprise en SQL)
 Script : [`sql/05_normalisation.sql`](../../sql/05_normalisation.sql), lancé par `run_all.sql`
-Preuves de la dénormalisation : [`preuves/L3_denormalisation.sql`](../../preuves/L3_denormalisation.sql) et son résultat `.txt`
+Preuves de la dénormalisation : [`L3_normalisation/L3_denormalisation.sql`](L3_denormalisation.sql) et son résultat `.txt`
 
 Tous les chiffres ci-dessous sont produits par ces scripts sur notre base.
 

@@ -84,9 +84,8 @@ COMMIT;
 -- avant de compter les places. La deuxième transaction attend que la première se
 -- termine, puis compte les places en voyant l'inscription validée par la première.
 -- =====================================================================
-VARIABLE g VARCHAR2(10)
-
 -- ÉTAPE 7 (A) : A demande un parcours qui contient la session 900001 (pas encore de COMMIT)
+VARIABLE g VARCHAR2(10)
 EXEC pkg_parcours.inscrire_parcours(1, t_liste_sessions(900001, 900002), p_date_operation => DATE '2027-01-10', p_id_groupe => :g)
 PRINT g
 -- Résultat : parcours accepté (G0xxxx). A tient maintenant le verrou des deux sessions.

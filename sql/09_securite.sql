@@ -3,7 +3,7 @@
 -- Livrable : L5 · Sécurité
 -- Responsable : Baptiste (avec Claude Code)
 -- Attendu  : rôle, vue de restriction sans données perso inutiles, VPD/masquage/audit unifié + preuve par compte
--- Lancé par : sql/run_all.sql (ne pas changer l'ordre sans prévenir)
+-- Lancé par : prerequis/run_all.sql (ne pas changer l'ordre sans prévenir)
 --
 -- Qui voit quoi :
 --   compte          rôle              vue                 lignes vues              données personnelles
@@ -21,7 +21,7 @@
 --
 -- Prérequis (installation_system.sql, en system) : CREATE ROLE, DB_DEVELOPER_ROLE
 -- (pour DBMS_RLS), et les comptes agent_bordeaux, agent_tours, direction.
--- Preuve de ce que voit chaque compte : preuves/L5_securite.sql et .txt
+-- Preuve de ce que voit chaque compte : L5_perf_et_securite/L5_securite.sql et .txt
 -- =====================================================================
 
 
