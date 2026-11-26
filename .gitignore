@@ -245,3 +245,4 @@ ecole_de_langues.code-workspace
 
 # notes de travail locales (comptes rendus, suivi, cours) : hors rendu
 /docs/
+L3_normalisation/**/*.csv
