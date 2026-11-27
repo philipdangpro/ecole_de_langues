@@ -87,7 +87,7 @@ CREATE OR REPLACE PACKAGE pkg_parcours AS
         p_id_groupe       OUT inscription.id_groupe%TYPE);
 
     -- Annule toutes les inscriptions confirmées d'un parcours, en un seul ordre UPDATE
-    -- (un parcours est confirmé ou annulé en entier : DF D9 du L3).
+    -- (un parcours est confirmé ou annulé en entier : DF D8 du L3).
     PROCEDURE annuler_parcours (p_id_groupe IN inscription.id_groupe%TYPE);
 
     -- Places encore libres d'une session (négatif pour une session sur-réservée).

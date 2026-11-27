@@ -18,10 +18,10 @@ SPOOL run_all.log
 @@../L1_modele/01_creation_tables.sql
 -- L2 : chargement des CSV, valeurs de contrôle C1 à C9, 10 requêtes métier
 @@../L2_chargement_requetes/02_chargement.sql
-@@../sql/03_valeurs_controle.sql
-@@../sql/04_requetes_metier.sql
+@@../L2_chargement_requetes/03_valeurs_controle.sql
+@@../L2_chargement_requetes/04_requetes_metier.sql
 -- L3 : table à plat, dépendances fonctionnelles, décomposition, dénormalisation
-@@../sql/05_normalisation.sql
+@@../L3_normalisation/05_normalisation.sql
 -- L4 : triggers (dont audit) et package du parcours multi-sites
 @@../sql/06_triggers.sql
 @@../sql/07_package_parcours.sql

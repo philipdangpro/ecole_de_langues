@@ -52,9 +52,9 @@ Tout se relance de zéro avec un seul fichier, `prerequis/run_all.sql`, connect�
 | 00    | `prerequis/00_nettoyage.sql`                      | supprime tout pour repartir de zéro                                                 |
 | 01    | `L1_modele/01_creation_tables.sql`                | L1 · tables et contraintes nommées                                                  |
 | 02    | `L2_chargement_requetes/02_chargement.sql`        | L2 · chargement des CSV et traitement des défauts                                   |
-| 03    | `sql/03_valeurs_controle.sql`                     | L2 · valeurs C1 à C9                                                                |
-| 04    | `sql/04_requetes_metier.sql`                      | L2 · 10 requêtes métier                                                             |
-| 05    | `sql/05_normalisation.sql`                        | L3 · table à plat, DF, décomposition, dénormalisation                               |
+| 03    | `L2_chargement_requetes/03_valeurs_controle.sql`                     | L2 · valeurs C1 à C9                                                                |
+| 04    | `L2_chargement_requetes/04_requetes_metier.sql`                      | L2 · 10 requêtes métier                                                             |
+| 05    | `L3_normalisation/05_normalisation.sql`           | L3 · table à plat, DF, décomposition, dénormalisation                               |
 | 06    | `sql/06_triggers.sql`                             | L4 · triggers et journal d'audit                                                    |
 | 07    | `sql/07_package_parcours.sql`                     | L4 · parcours multi-sites tout ou rien                                              |
 | 08    | `sql/08_performance.sql`                          | L5 · requêtes lentes, index, vue matérialisée                                       |
@@ -82,8 +82,8 @@ Le kit demande de lancer un moteur NoSQL à la fois (`docker compose --profile e
 | Livrable | Documents |
 | --- | --- |
 | L1 | `L1_modele/L1_modele.md` (16 règles de gestion, E/A, relationnel), `L1_modele/L1_schema_relationnel.md`, `L1_modele/modele E_A.png` |
-| L2 | `L2_chargement_requetes/L2_chargement_requetes.md`, `sql/03_valeurs_controle.sql`, `sql/04_requetes_metier.sql` |
-| L3 | `L3_normalisation/L3_normalisation.md` (version SQL, rejouable) ; exploration Python initiale dans le même dossier |
+| L2 | `L2_chargement_requetes/L2_chargement_requetes.md`, `L2_chargement_requetes/03_valeurs_controle.sql`, `L2_chargement_requetes/04_requetes_metier.sql` |
+| L3 | `L3_normalisation/L3_normalisation.md` (version SQL, rejouable) ; exploration Python initiale (Younes) dans `L3_normalisation/exploration_python/` |
 | L4 | `sql/06_triggers.sql`, `sql/07_package_parcours.sql`, `L4_fiabilite/` |
 | L5 | `sql/08_performance.sql`, `sql/09_securite.sql`, `L5_perf_et_securite/` |
 | L6 | `L6_distribution/L6_distribution.md` (mesures, panne, MongoDB, CAP / PACELC, RGPD) |
