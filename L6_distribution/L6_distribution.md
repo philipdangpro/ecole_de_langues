@@ -1,6 +1,6 @@
 # L6 · Distribution
 
-Groupe 07 · École de langues. Scripts : `sql/10_distribution.sql` (lancé par `run_all.sql`), `sql/L6_panne_reprise.sql` (à la main), `L7_nosql/mongodb/`.
+Groupe 07 · École de langues. Scripts : `L6_distribution/10_distribution.sql` (lancé par `run_all.sql`), `L6_distribution/L6_panne_reprise.sql` (à la main), `L7_nosql/mongodb/`.
 Preuves : `preuves/L6_distribution.txt`, `preuves/L6_panne_reprise.txt`, `preuves/L6_mongodb.txt`.
 
 Ce que demande le sujet : *fragmentation de vos données par site, mise en œuvre avec plusieurs schémas, des liens et des vues globales ; une panne de site et sa reprise ; une collection MongoDB shardée avec une clé de sharding justifiée par la répartition mesurée ; le classement CAP / PACELC de vos choix.*

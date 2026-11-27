@@ -232,4 +232,4 @@ FROM   l5_mesure a
 JOIN   l5_mesure p ON p.requete = a.requete AND p.version = 'APRES'
 WHERE  a.version = 'AVANT'
 ORDER BY a.requete;
--- Résultat : voir preuves/L5_performance.txt et docs/comptes_rendus/05_L5_performance_securite.md
+-- Résultat : voir preuves/L5_performance.txt

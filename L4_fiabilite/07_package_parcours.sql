@@ -22,7 +22,7 @@
 --   - en cas de succès : les inscriptions sont posées, l'appelant fait COMMIT ;
 --   - en cas d'erreur  : ROLLBACK TO SAVEPOINT, la base revient à l'état d'avant l'appel
 --     (même les inscriptions déjà posées dans la boucle), puis l'erreur est renvoyée.
--- Tests : L4_fiabilite/L4_tests_fiabilite.sql. Concurrence : sql/L4_concurrence_session_A/B.sql
+-- Tests : L4_fiabilite/L4_tests_fiabilite.sql. Concurrence : L4_fiabilite/L4_concurrence_session_A/B.sql
 -- =====================================================================
 
 

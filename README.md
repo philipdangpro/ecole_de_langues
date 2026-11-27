@@ -55,22 +55,22 @@ Tout se relance de zéro avec un seul fichier, `prerequis/run_all.sql`, connect�
 | 03    | `L2_chargement_requetes/03_valeurs_controle.sql`                     | L2 · valeurs C1 à C9                                                                |
 | 04    | `L2_chargement_requetes/04_requetes_metier.sql`                      | L2 · 10 requêtes métier                                                             |
 | 05    | `L3_normalisation/05_normalisation.sql`           | L3 · table à plat, DF, décomposition, dénormalisation                               |
-| 06    | `sql/06_triggers.sql`                             | L4 · triggers et journal d'audit                                                    |
-| 07    | `sql/07_package_parcours.sql`                     | L4 · parcours multi-sites tout ou rien                                              |
-| 08    | `sql/08_performance.sql`                          | L5 · requêtes lentes, index, vue matérialisée                                       |
-| 09    | `sql/09_securite.sql`                             | L5 · rôles, vues de restriction, sécurité par ligne (VPD)                           |
-| 10    | `sql/10_distribution.sql`                         | L6 · fragmentation par site, liens, vues globales                                   |
-| 11    | `sql/11_bonus_objet.sql`                          | bonus objet-relationnel : type `t_campus` avec méthode, sous-type `t_site`, requête |
+| 06    | `L4_fiabilite/06_triggers.sql`                    | L4 · triggers et journal d'audit                                                    |
+| 07    | `L4_fiabilite/07_package_parcours.sql`            | L4 · parcours multi-sites tout ou rien                                              |
+| 08    | `L5_perf_et_securite/08_performance.sql`                          | L5 · requêtes lentes, index, vue matérialisée                                       |
+| 09    | `L5_perf_et_securite/09_securite.sql`                             | L5 · rôles, vues de restriction, sécurité par ligne (VPD)                           |
+| 10    | `L6_distribution/10_distribution.sql`                         | L6 · fragmentation par site, liens, vues globales                                   |
+| 11    | `bonus_objet/11_bonus_objet.sql`                          | bonus objet-relationnel : type `t_campus` avec méthode, sous-type `t_site`, requête |
 
 Scripts lancés **à la main**, après `run_all.sql` :
 
 | Script | Livrable | Connexion | Résultat de référence |
 | --- | --- | --- | --- |
 | `L3_normalisation/L3_denormalisation.sql` | L3 · tests de la dénormalisation | `langues` | `preuves/L3_denormalisation.txt` |
-| `L4_fiabilite/L4_tests_fiabilite.sql` | L4 · 14 tests des triggers et du package | `langues` | `preuves/L4_tests_fiabilite.txt` |
-| `sql/L4_concurrence_session_A.sql` + `_B.sql` | L4 · anomalie de concurrence | deux connexions `langues` ouvertes en même temps (feuille non partagée), étapes en alternance | `preuves/L4_concurrence.txt` |
+| `L4_fiabilite/L4_tests_fiabilite.sql` | L4 · tests des triggers et du package (12 contrôles OK + 2 tableaux à lire) | `langues` | `preuves/L4_tests_fiabilite.txt` |
+| `L4_fiabilite/L4_concurrence_session_A.sql` + `_B.sql` | L4 · anomalie de concurrence | deux connexions `langues` ouvertes en même temps (feuille non partagée), étapes en alternance | `preuves/L4_concurrence.txt` |
 | `L5_perf_et_securite/L5_securite.sql` | L5 · ce que voit chaque compte | se connecte tour à tour avec `agent_bordeaux`, `agent_tours`, `direction` | `preuves/L5_securite.txt` |
-| `sql/L6_panne_reprise.sql` | L6 · panne d'Angers et reprise | `langues`, sauf étapes 2 et 4 en `system` | `preuves/L6_panne_reprise.txt` (18 OK) |
+| `L6_distribution/L6_panne_reprise.sql` | L6 · panne d'Angers et reprise | `langues`, sauf étapes 2 et 4 en `system` | `preuves/L6_panne_reprise.txt` (18 OK) |
 | `L7_nosql/mongodb/` | L6 · collection MongoDB shardée | voir `L7_nosql/mongodb/README.md` | `preuves/L6_mongodb.txt` |
 | `L7_nosql/elasticsearch/` | L7 · recherche d'un étudiant | voir `L7_nosql/elasticsearch/README.md` | `preuves/L7_elasticsearch.txt` |
 | `L7_nosql/neo4j/` | L7 · recommandation de sessions | voir `L7_nosql/neo4j/README.md` | `preuves/L7_neo4j.txt` |
@@ -84,11 +84,12 @@ Le kit demande de lancer un moteur NoSQL à la fois (`docker compose --profile e
 | L1 | `L1_modele/L1_modele.md` (16 règles de gestion, E/A, relationnel), `L1_modele/L1_schema_relationnel.md`, `L1_modele/modele E_A.png` |
 | L2 | `L2_chargement_requetes/L2_chargement_requetes.md`, `L2_chargement_requetes/03_valeurs_controle.sql`, `L2_chargement_requetes/04_requetes_metier.sql` |
 | L3 | `L3_normalisation/L3_normalisation.md` (version SQL, rejouable) ; exploration Python initiale (Younes) dans `L3_normalisation/exploration_python/` |
-| L4 | `sql/06_triggers.sql`, `sql/07_package_parcours.sql`, `L4_fiabilite/` |
-| L5 | `sql/08_performance.sql`, `sql/09_securite.sql`, `L5_perf_et_securite/` |
-| L6 | `L6_distribution/L6_distribution.md` (mesures, panne, MongoDB, CAP / PACELC, RGPD) |
+| L4 | `L4_fiabilite/` (triggers, package, tests, concurrence) |
+| L5 | `L5_perf_et_securite/` (performance, sécurité, preuve par compte) |
+| L6 | `L6_distribution/` (fragmentation, panne et reprise), `L7_nosql/mongodb/` (MongoDB shardé) ; `L6_distribution/L6_distribution.md` (mesures, panne, MongoDB, CAP / PACELC, RGPD) |
 | L7 | `L7_nosql/` |
 | L8 | `L8_adr/ADR-01.md`, `L8_adr/ADR-02.md`, `L8_adr/options_ADR.md` |
+| Bonus | `bonus_objet/11_bonus_objet.sql` (type `t_campus`, sous-type `t_site`, méthode, requête) |
 | Rapport | `RAPPORT.md` |
 
 ## Vocabulaire du sujet → nos données
