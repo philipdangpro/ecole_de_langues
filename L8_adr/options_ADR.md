@@ -5,7 +5,7 @@
 | ADR | Option | Où on l'a vue |
 |---|---|---|
 | ADR-01 | A. Tout au siège | point de départ du L1 au L5 |
-| ADR-01 | B. Fragments par site (retenue) | L6, `sql/10_distribution.sql` |
+| ADR-01 | B. Fragments par site (retenue) | L6, `L6_distribution/10_distribution.sql` |
 | ADR-01 | C. B avec l'étudiant copié | L6, « ce qui changerait le classement » |
 | ADR-02 | A. Oracle seul (`=`, `LIKE`, puis `UTL_MATCH`) | L7, `L7_oracle_comparaison.sql` |
 | ADR-02 | C. Elasticsearch (retenue) | L7, `L7_nosql/elasticsearch/` |

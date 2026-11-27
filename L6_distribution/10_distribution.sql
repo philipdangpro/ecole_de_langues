@@ -37,7 +37,7 @@
 -- (pkg_reparti) n'écrivent que dans les fragments.
 --
 -- Codes d'erreur pris par le L6 : -20020 à -20026.
--- Panne et reprise d'un site : sql/L6_panne_reprise.sql (à lancer à la main).
+-- Panne et reprise d'un site : L6_distribution/L6_panne_reprise.sql (à lancer à la main).
 -- =====================================================================
 
 

@@ -104,9 +104,16 @@ Une première exploration en Python (Younes) est gardée dans `L3_normalisation/
 | `TRG_INSCRIPTION_DOUBLON`, `TRG_ETUDIANT_PARRAIN` (triggers composés) | RG13 une seule confirmation par session, RG7 parrain plus ancien. Composés car un trigger ligne lirait une table en mutation (ORA-04091). Pas d'index unique pour RG13 : les 154 doublons historiques l'empêchent | T5, T11, T13 |
 | `PKG_PARCOURS.inscrire_parcours` | parcours multi-sites **tout ou rien** (`SAVEPOINT`), verrouille chaque session (`SELECT … FOR UPDATE`) puis compte les places : refuse la sur-réservation (ORA-20010) | T1, T3, T8 à T10, T12, T14 |
 
-14 tests, tous OK (`L4_fiabilite/L4_tests_fiabilite.sql`, `preuves/L4_tests_fiabilite.txt`).
+14 tests : 12 contrôles automatiques OK et 2 vérifications par tableau (T2, le journal d'audit ; T13, le parrain accepté) (`L4_fiabilite/L4_tests_fiabilite.sql`, `preuves/L4_tests_fiabilite.txt`).
 
-**Anomalie de concurrence** (`sql/L4_concurrence_session_A.sql` / `_B.sql`, deux sessions) : deux étudiants voient chacun la dernière place d'une session (capacité 1) et s'inscrivent : **2 places confirmées pour 1** (écriture biaisée). Le niveau `SERIALIZABLE` ne corrige pas (les deux INSERT touchent des lignes différentes). Correction : le verrou `FOR UPDATE` du package. B attend le COMMIT de A, puis reçoit ORA-20010 et ne garde rien, pas même la session qui avait de la place. Rejoué le 26/11/2026 avec deux connexions réelles.
+**Anomalie de concurrence** (`L4_fiabilite/L4_concurrence_session_A.sql` / `_B.sql`, deux sessions) : deux étudiants voient chacun la dernière place d'une session (capacité 1) et s'inscrivent : **2 places confirmées pour 1** (écriture biaisée). Le niveau `SERIALIZABLE` ne corrige pas (les deux INSERT touchent des lignes différentes). Correction : le verrou `FOR UPDATE` du package. B attend le COMMIT de A, puis reçoit ORA-20010 et ne garde rien, pas même la session qui avait de la place. Rejoué le 26/11/2026 avec deux connexions réelles.
+
+**Justification des décisions.**
+- **Audit dans la transaction, pas en transaction autonome** : le journal ne doit contenir que ce qui a vraiment été enregistré. Une transaction autonome garderait la trace d'inscriptions d'un parcours refusé, qui n'ont jamais existé.
+- **Triggers composés pour RG13 et RG7** : ces règles portent sur plusieurs lignes de la même table ; un trigger ligne ne peut pas la relire (ORA-04091). Un index unique aurait suffi pour RG13, mais les 154 doublons historiques, gardés au L2, l'empêchent.
+- **Montant et site calculés par trigger** : la valeur fournie par l'appelant est remplacée. La règle ne dépend donc d'aucun programme.
+- **Verrou `FOR UPDATE` plutôt que `SERIALIZABLE`** : l'anomalie est une écriture biaisée sur deux lignes différentes, que `SERIALIZABLE` ne détecte pas. Verrouiller la ligne de la session sérialise uniquement les inscriptions qui visent la même session ; les autres continuent en parallèle. Les sessions sont verrouillées dans l'ordre de leur id, ce qui évite l'interblocage entre deux parcours.
+- **Limite assumée** : le contrôle de capacité est dans le package. L'application ne reçoit que le droit d'exécuter le package, jamais celui d'insérer dans la table (au L5, les comptes des agents n'ont que `SELECT` sur une vue).
 
 ## L5 · Performance et sécurité
 
@@ -126,6 +133,14 @@ Mesure : hint `GATHER_PLAN_STATISTICS` + `DBMS_XPLAN.DISPLAY_CURSOR('ALLSTATS LA
 
 Mécanisme : **sécurité par ligne (VPD)** sur INSCRIPTION et SESSION_COURS, site lu dans la table `COMPTE_SITE` (ajouter un agent = une ligne, sans code). Preuve compte par compte (`L5_perf_et_securite/L5_securite.sql`, `preuves/L5_securite.txt`) : même requête, résultats différents ; refus ORA-00904 (e-mail hors vue), ORA-00942 (tables, vue d'un autre rôle), ORA-41900 (modification).
 
+**Justification des décisions.**
+- **Q1, index sur l'étudiant** : la clé étrangère n'avait pas d'index (choix du L1 : indexer sur mesure). `id_session` et `statut` sont ajoutés derrière, pour que le même index serve au contrôle RG13 du L4.
+- **Q2, index couvrant** : c'est la requête du contrôle de sur-réservation, lancée à chaque inscription, donc des milliers de fois le 10/09. L'index contient toutes les colonnes demandées : Oracle ne lit plus la table. Il sert aussi d'index à la clé étrangère vers la session.
+- **Q3, vue matérialisée plutôt qu'un index ou un partitionnement** : la requête lit toutes les inscriptions confirmées, aucun index n'y change rien. La vue est calculée par site, langue et mois (432 lignes), ce qui sert aussi d'autres tableaux. La réécriture automatique évite de modifier les programmes. Un tableau de bord tolère des chiffres de la veille : recalcul à la demande, et une vue périmée n'est jamais utilisée.
+- **Mesure en blocs lus plutôt qu'en temps** : les blocs ne dépendent pas de ce qui est déjà en cache ; la mesure est reproductible.
+- **Vues de restriction** : l'agent d'accueil a besoin du nom et du téléphone pour reconnaître l'étudiant, pas de son e-mail, de sa ville ni de son parrain. La direction ne voit aucune donnée personnelle, pas même l'identifiant, qui permettrait de suivre une personne.
+- **VPD plutôt qu'une vue par site** : une seule vue et une seule politique pour tous les sites. Le site de chaque compte est lu dans `COMPTE_SITE` : ajouter un agent, c'est ajouter une ligne, sans code. La politique s'applique aussi en écriture.
+
 ## L6 · Distribution
 
 | Élément | Décision | Mesure |
@@ -138,6 +153,14 @@ Mécanisme : **sécurité par ligne (VPD)** sur INSCRIPTION et SESSION_COURS, si
 
 **CAP / PACELC** (détail : `L6_distribution/L6_distribution.md`) : vues globales, parcours 2PC, étudiant en une seule copie, MongoDB par défaut : **PC/EC** (pour l'argent et les places, on refuse plutôt que de répondre faux) ; file d'attente des inscriptions simples, copie du catalogue : **PA/EC** (l'écart se rattrape à la reprise, sans jamais forcer une place) ; CATEGORIE répliquée : **PA/EL**.
 
+**Justification des décisions.**
+- **Fragmenter selon le site de la session** : la règle critique, la capacité, porte sur la session. Avec l'inscription rangée à côté de sa session, le contrôle des places reste local à un site. C'est ce que permet `id_site` du L3.
+- **Étudiant dans son site de rattachement, sans copie** : 93,5 % des inscriptions ont leur étudiant dans le même site. Copier l'étudiant partout aurait multiplié les données personnelles à synchroniser et à effacer.
+- **CATEGORIE répliquée** : 6 lignes qui ne changent pas ; une copie dans chaque site évite un lien pour chaque requête.
+- **Panne : refuser le parcours plutôt que l'accepter en partie** : le parcours est tout ou rien (L4). Le 2PC garantit qu'aucun site ne garde une partie du parcours. Les inscriptions simples, elles, peuvent attendre : la file au siège les rejoue à la reprise, avec un nouveau contrôle des places.
+- **Clé MongoDB `id_etudiant` hachée** : choisie sur la répartition mesurée. Par site : 3 valeurs seulement, impossible de découper finement, et Tours porte 46 %. Par date : le pic de la rentrée tombe sur un seul shard. L'étudiant haché répartit à 33 / 32 / 34 % et garde l'historique et le parcours d'un étudiant sur un seul shard.
+- **CAP / PACELC** : pour l'argent et les places, une réponse fausse coûte plus cher qu'un refus (PC/EC). Pour la file d'attente et la copie du catalogue, un écart temporaire est acceptable, car il se rattrape sans jamais forcer une place (PA).
+
 ## L7 · NoSQL
 
 | Moteur | Besoin réel (mesuré dans Oracle) | Résultat |
@@ -147,9 +170,17 @@ Mécanisme : **sécurité par ligne (VPD)** sur INSCRIPTION et SESSION_COURS, si
 
 Mesure écrite telle quelle : la même recommandation en SQL donne les mêmes 5 sessions plus vite (633 blocs, 0,02 s contre 0,1 à 0,25 s). Neo4j est gardé pour la lisibilité des parcours de longueur variable ; nous ne prétendons pas qu'il est plus rapide sur ce volume. Comparaisons : `L7_nosql/*/L7_oracle_comparaison.sql`.
 
+**Justification des décisions.**
+- **Un besoin réel par moteur, mesuré d'abord dans Oracle** : le sujet demande « un besoin réel de votre plateforme ». Avec 50 noms pour 21 471 étudiants, retrouver quelqu'un au téléphone malgré une faute est un vrai problème de l'accueil ; Oracle n'en trouve aucun.
+- **Elasticsearch, index minimal** : seulement ce qui sert à reconnaître la personne (nom, prénom, ville, site). Ni e-mail ni téléphone : moins de données personnelles copiées hors d'Oracle. Oracle reste la référence ; l'index est reconstruit à chaque export.
+- **Neo4j, des sessions plutôt que des langues** : 60 % des étudiants ont déjà suivi les 6 langues, une recommandation de langue ne leur servirait à rien. Le graphe ne contient ni nom ni e-mail.
+- **Mesure honnête** : SQL est plus rapide sur notre volume. Neo4j est retenu pour la lisibilité de la requête quand le chemin s'allonge, et nous l'écrivons.
+
 ## Bonus objet-relationnel
 
-`t_campus` (`NOT FINAL`, méthode `presenter()`), `t_site UNDER t_campus`, table objet `campus_objet`, requête avec `IS OF` / `TREAT` qui appelle la méthode : « Site Tours (Tours) », type `T_SITE` (`sql/11_bonus_objet.sql`). L'exemple reprend l'héritage réel du L1.
+`t_campus` (`NOT FINAL`, méthode `presenter()`), `t_site UNDER t_campus`, table objet `campus_objet`, requête avec `IS OF` / `TREAT` qui appelle la méthode : « Site Tours (Tours) », type `T_SITE` (`bonus_objet/11_bonus_objet.sql`). L'exemple reprend l'héritage réel du L1.
+
+**Justification.** Plutôt qu'un exemple inventé, le bonus reprend l'héritage déjà présent dans le modèle (CAMPUS → SITE, L1). La méthode `presenter()` est définie une seule fois dans le type parent et héritée par le sous-type, ce qui montre l'intérêt de l'héritage dans une requête réelle.
 
 ## Demande de changement
 
@@ -225,7 +256,7 @@ Nous choisissons B. La session décide du site : une inscription reste avec sa s
 
 ### 8. Liens
 
-L3 (colonne `id_site`), L4 (parcours tout ou rien), L6 (`sql/10_distribution.sql`, `L6_distribution/L6_distribution.md`), ADR-02.
+L3 (colonne `id_site`), L4 (parcours tout ou rien), L6 (`L6_distribution/10_distribution.sql`, `L6_distribution/L6_distribution.md`), ADR-02.
 
 ## ADR-02 · Rechercher un étudiant malgré les fautes avec Elasticsearch
 
@@ -481,7 +512,7 @@ Les entrées les plus récentes vont en haut.
 
 | Date       | Qui      | Livrable | Type     | Ce qui s'est passé                                                                                                                                                        | Résolution / décision                                                                                                                                                                                                                 |
 | ---------- | -------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-11-27 | Baptiste | L3 | décision | Relecture du L3 : la DF « libellé → session » était retenue comme 2e clé de SESSION, alors que les libellés sont fabriqués à partir de l'identifiant (« Session FLE 1 ») et qu'aucune contrainte `UNIQUE` ne la garantit. Le document annonçait aussi INSCRIPTION en BCNF alors qu'elle garde le site, le montant et le parcours, et renvoyait l'opération groupée à un ADR qui ne la traite pas | DF déplacée dans les DF écartées (N5, même raisonnement que N4), numérotation D5 à D8 décalée. Forme normale réelle écrite : décomposition théorique en BCNF, INSCRIPTION en 2NF par choix ; les trois écarts (site, montant historisé, parcours) justifiés dans `L3_normalisation.md`, partie 4. Ajout du contrôle D8 après chargement (0 violation) |
+| 2026-11-27 | Baptiste | L3 | décision | Relecture du L3 : « libellé → session » retenue à tort (libellé fabriqué à partir de l'id) | Déplacée dans les DF écartées (N5) ; forme normale réelle et justifications écrites dans `L3_normalisation.md` |
 | 2026-11-26 | Baptiste | — | erreur | Relance sur un kit neuf (comptes supprimés, `installation_system.sql`, puis `run_all.sql`) après la réorganisation des dossiers (PR #11, #12) : seuls L1 et L2 étaient reconstruits. Dans `prerequis/run_all.sql`, les étapes 05 à 11 étaient commentées, 03 et 04 marquées « à enlever », et les chemins visaient l'ancien dossier `sql/` | Chemins relatifs corrigés depuis `prerequis/` (`@@../L1_modele/…`, `@@../sql/…`), toutes les étapes réactivées, recompilation finale du schéma. Kit neuf : 1 min 06 s, 0 erreur ORA/SP2/PLS, 0 objet invalide. Preuves manuelles rejouées : L3, L4 (14 tests, concurrence), L5, L6 (18 OK), MongoDB, Elasticsearch, Neo4j |
 | 2026-11-26 | Baptiste | L2 | erreur | `04_requetes_metier.sql` dans `run_all` : plus de 10 min, `run_all.log` de 230 000 lignes (R2, R3, R4, R5, R6, R8 affichaient toutes leurs lignes) ; R5 (division en double `NOT EXISTS`) seule tournait encore après 5 min | Sorties bornées (totaux ou `FETCH FIRST 10`), résultats écrits en commentaire. R5 : pas d'index sur `INSCRIPTION.id_etudiant` avant le L5, Oracle relisait la table pour chaque couple étudiant × langue ; couples manquants construits dans un seul bloc → anti-jointure par hachage, 0,15 s, 12 985 (= division par comptage). R3 sur les étudiants : 0 ligne, remplacée par les sessions sans inscrit (4) |
 | 2026-11-26 | Baptiste | L7 | erreur | `docker exec elasticsearch bash /tmp/L7_recherche.sh` : `$'

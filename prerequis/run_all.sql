@@ -23,15 +23,15 @@ SPOOL run_all.log
 -- L3 : table à plat, dépendances fonctionnelles, décomposition, dénormalisation
 @@../L3_normalisation/05_normalisation.sql
 -- L4 : triggers (dont audit) et package du parcours multi-sites
-@@../sql/06_triggers.sql
-@@../sql/07_package_parcours.sql
+@@../L4_fiabilite/06_triggers.sql
+@@../L4_fiabilite/07_package_parcours.sql
 -- L5 : performance (index, vue matérialisée) et sécurité (rôles, vues, VPD)
-@@../sql/08_performance.sql
-@@../sql/09_securite.sql
+@@../L5_perf_et_securite/08_performance.sql
+@@../L5_perf_et_securite/09_securite.sql
 -- L6 : fragmentation par site, liens, vues globales
-@@../sql/10_distribution.sql
+@@../L6_distribution/10_distribution.sql
 -- Bonus : type objet avec héritage et méthode
-@@../sql/11_bonus_objet.sql
+@@../bonus_objet/11_bonus_objet.sql
 
 -- Recompile ce qui a été invalidé en route (V_SESSION_OCCUPATION, après l'ajout
 -- de INSCRIPTION.id_site au L3), puis vérifie qu'aucun objet ne reste invalide.
