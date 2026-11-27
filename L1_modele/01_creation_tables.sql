@@ -177,21 +177,3 @@ SELECT s.id_session, s.libelle, s.id_campus AS id_site, s.capacite,
 FROM   session_cours s
 LEFT JOIN inscription i ON i.id_session = s.id_session
 GROUP BY s.id_session, s.libelle, s.id_campus, s.capacite;
-
-
--- ---------------------------------------------------------------------
--- Commentaires stockés dans le dictionnaire (visibles dans SQL Developer, onglet Détails)
--- ---------------------------------------------------------------------
-COMMENT ON TABLE campus        IS 'Siège ou site de l''école (RG1). Le type est détaillé dans SIEGE ou SITE.';
-COMMENT ON TABLE siege         IS 'Sous-type de CAMPUS : un seul siège (RG2).';
-COMMENT ON TABLE site          IS 'Sous-type de CAMPUS : Bordeaux, Tours, Angers. Porte les étudiants et les sessions (RG3).';
-COMMENT ON TABLE etudiant      IS 'Usager. Une personne = un e-mail normalisé (RG4, RG5).';
-COMMENT ON TABLE categorie     IS 'Langue enseignée (FLE, anglais, espagnol, allemand, italien, chinois).';
-COMMENT ON TABLE session_cours IS 'Ressource datée : une session de cours dans un site (RG8).';
-COMMENT ON TABLE inscription   IS 'Opération : un étudiant réserve des places à une session (association porteuse, RG9).';
-
-COMMENT ON COLUMN etudiant.date_inscription  IS 'Date de création du compte (RG14), à ne pas confondre avec INSCRIPTION.date_operation.';
-COMMENT ON COLUMN etudiant.id_parrain        IS 'Parrain (association réflexive, RG7). Absent des CSV : colonne ajoutée, vide au départ.';
-COMMENT ON COLUMN inscription.date_operation IS 'Date de l''inscription (colonne date_inscription de inscriptions.csv).';
-COMMENT ON COLUMN inscription.montant        IS 'nb_places x prix_unitaire, même pour une annulation (RG12).';
-COMMENT ON COLUMN inscription.id_groupe      IS 'Opération groupée (parcours) passée en une fois, tout ou rien (RG16).';

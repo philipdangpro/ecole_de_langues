@@ -1,27 +1,24 @@
 # Compte rendu 03 · L3, normalisation (reprise en SQL) — 27/10/2026
 
-Auteur : Baptiste (avec Claude Code)
-
 ## En une phrase
 
-Le L3 de Younes, écrit en Python, est refait en SQL dans `sql/05_normalisation.sql`. Le script crée la table à plat, vérifie chaque dépendance fonctionnelle par une requête, prouve que la décomposition ne perd rien, et met en place une vraie dénormalisation, mesurée et testée. `run_all.sql` tourne sans erreur.
+Le L3 écrit en Python, est refait en SQL dans `L3_normalisation/05_normalisation.sql`. Le script crée la table à plat, vérifie chaque dépendance fonctionnelle par une requête, prouve que la décomposition ne perd rien, et met en place une vraie dénormalisation, mesurée et testée. `run_all.sql` tourne sans erreur.
 
 ## Les fichiers
 
 | Fichier | Rôle | Pour qui |
 |---|---|---|
-| `sql/05_normalisation.sql` | Le livrable, relancé par l'enseignante | Enseignante |
+| `L3_normalisation/05_normalisation.sql` | Le livrable, relancé par l'enseignante | Enseignante |
 | `L3_normalisation/L3_normalisation.md` | Explication complète, à reprendre dans le rapport | Groupe, rapport |
 | `L3_normalisation/L3_denormalisation.sql` / `.txt` | Mesures et tests de la dénormalisation (hors `run_all`) | Rapport, oral |
 | Ce fichier | Ce que j'ai fait, et ce que je dois savoir expliquer | Toi |
 | `.gitignore` | Ajout de `scripts/**/*.csv` : plus de CSV générés dans Git | Groupe |
 
-`IA.md` n'a pas été touché : tu t'en occupes.
 
 ## Ce qui n'allait pas dans la version Python
 
 1. **Elle ne pouvait pas être relancée.** Le kit du cours n'a pas Python, et 14 points sur 20 dépendent de la relance des scripts.
-2. **La « décomposition » recopiait les CSV.** `l3_decomposition.py` relisait les 4 CSV et les réécrivait à l'identique. Rien ne venait des dépendances.
+2. **La « décomposition » recopiait les CSV.** `exploration_python/l3_decomposition.py` relisait les 4 CSV et les réécrivait à l'identique. Rien ne venait des dépendances.
 3. **Les dépendances n'étaient jamais vérifiées.** Le texte répétait « à vérifier », « sous réserve » : aucune conclusion.
 4. **Les défauts étaient ignorés.** Les doublons et les opérations non valides étaient gardés, en contradiction avec notre L2.
 5. **pandas avait abîmé des valeurs.** Les téléphones avaient perdu leur 0 initial, et des entiers étaient devenus `4.0`.
@@ -76,13 +73,13 @@ Le L3 de Younes, écrit en Python, est refait en SQL dans `sql/05_normalisation.
 ## Comment vérifier
 
 1. SQL Developer, connexion `langues` : `prerequis/run_all.sql`, F5. La reconstruction complète prend environ 50 secondes ; c'est la table à plat de 88 Mo qui prend le plus de temps.
-2. Les résultats du L3 s'affichent à la fin du journal d'exécution : les tableaux D1 à D9, N1 à N4, puis la vérification sans perte.
+2. Les résultats du L3 s'affichent à la fin du journal d'exécution : les tableaux D1 à D8, N1 à N5, puis la vérification sans perte.
 3. Preuves de la dénormalisation : lancer `L3_normalisation/L3_denormalisation.sql` en sqlplus, ou lire `preuves/L3_denormalisation.txt`. Les tests sont annulés à la fin (`ROLLBACK`).
 
 ## Problèmes rencontrés pendant le travail
 
 - **Deux chiffres différents de ce que j'attendais :**
-  - D7 donne 88 violations, pas 80. La décomposition a montré que 8 viennent de sessions inexistantes.
+  - D6 donne 88 violations, pas 80. La décomposition a montré que 8 viennent de sessions inexistantes.
   - La décomposition ne retrouve que 3 campus au lieu de 4, à cause du siège.
 
   Les deux sont expliqués dans le script et dans la doc.
@@ -99,5 +96,5 @@ Le L3 de Younes, écrit en Python, est refait en SQL dans `sql/05_normalisation.
 
 - **Valeurs de contrôle :** les mesures ont déjà calculé **C5** (27 333 192 / 56 080 982 / 39 082 945 pour les sites 2, 3 et 4), **C6** (12 356) et **C8** (1 874). Ces chiffres sont à reprendre dans `03_valeurs_controle.sql`, avec leurs requêtes.
 - **L4** : le trigger du L3 utilise le code d'erreur `-20001`. Les triggers du L4 doivent prendre d'autres numéros.
-- **ADR** : « où stocker l'opération groupée » a maintenant des arguments chiffrés (D8, D9).
+- **ADR** : « où stocker l'opération groupée » a maintenant des arguments chiffrés (D7, D8).
 - La vue `V_INSCRIPTION_SITE` (L1) pourrait lire `id_site` directement. Je ne l'ai pas modifiée, puisque ce n'était pas demandé.

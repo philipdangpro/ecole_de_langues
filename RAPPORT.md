@@ -20,7 +20,20 @@ Tous les chiffres de ce rapport sont produits par nos scripts sur notre base, re
 | C8 | opérations groupées engageant au moins deux sites | **1 874** (sur 2 667 parcours) |
 | C9 | places confirmées par catégorie | **FLE 55 104 · allemand 52 705 · anglais 54 870 · chinois 54 681 · espagnol 54 579 · italien 54 530** (total 326 469 = C3) |
 
-Requêtes : annexe A (`sql/03_valeurs_controle.sql`). C5, C6 et C8 sont recalculés à l'identique sur la collection MongoDB shardée (L6), et C1 sur le CSV brut, avec la règle du sujet.
+Requêtes : annexe A (`L2_chargement_requetes/03_valeurs_controle.sql`). C5, C6 et C8 sont recalculés à l'identique sur la collection MongoDB shardée (L6), et C1 sur le CSV brut, avec la règle du sujet.
+
+C2 compte les défauts des données reçues, pas ceux de la base : les opérations non valides ne sont pas chargées dans `INSCRIPTION`, mais gardées dans `INSCRIPTION_REJET` avec leur motif (rejet tracé). C'est ce qui permet de les compter et de les retrouver ; un refus silencieux par contrainte les aurait fait disparaître. Pour vérifier que notre logique de rejet ne se trompe pas, la règle du sujet a aussi été appliquée directement aux tables externes, sans passer par le chargement : 397 opérations non valides sur 354 855 lignes du CSV, le même nombre que dans `INSCRIPTION_REJET`. Requête de vérification :
+
+```sql
+SELECT COUNT(*) AS lignes_csv,
+       SUM(CASE WHEN s.id_session IS NULL
+                  OR TO_NUMBER(i.montant, '999999D99', 'NLS_NUMERIC_CHARACTERS=''.,''') < 0
+                  OR TO_DATE(TRIM(i.date_inscription), 'YYYY-MM-DD HH24:MI:SS')
+                     > TO_DATE(TRIM(s.debut), 'YYYY-MM-DD HH24:MI:SS')
+                THEN 1 ELSE 0 END) AS c2
+FROM ext_inscriptions i
+LEFT JOIN ext_sessions s ON s.id_session = i.id_session;
+```
 
 ---
 
@@ -48,7 +61,7 @@ Schéma entité-association : `L1_modele/modele E_A.png`. Schéma relationnel co
 
 Chargement : tables externes + `INSERT … SELECT` (354 855 lignes en quelques secondes ; `DETECTED NEWLINE`, point décimal imposé). Bilan : 21 471 étudiants, 47 619 sessions, 354 458 inscriptions chargées, 397 rejetées.
 
-**10 requêtes métier** (`sql/04_requetes_metier.sql`, énoncé et résultat en commentaire) :
+**10 requêtes métier** (`L2_chargement_requetes/04_requetes_metier.sql`, énoncé et résultat en commentaire) :
 
 | | Énoncé | Notion | Résultat |
 |---|---|---|---|
@@ -69,13 +82,18 @@ R5 : la forme d'école de la division a été arrêtée après 5 min (pas encore
 
 | Étape | Résultat mesuré | Fichier |
 |---|---|---|
-| Table à plat `OPERATION_A_PLAT` (opération + étudiant + session + 2 campus) | 354 855 lignes, 28 colonnes, 88 Mo (23 Mo décomposée). Anomalies constatées : le siège ne peut pas y figurer (insertion), 16 lignes par e-mail à modifier (modification), une session disparaît avec sa dernière opération (suppression) | `sql/05_normalisation.sql` |
-| 9 DF retenues, vérifiées par requête (violations comptées) | D6 e-mail → étudiant : 73 violations sur le CSV brut, 0 après le L2 ; D7 (session, places) → montant : 88, puis 0 ; D8 groupe → étudiant : 9, puis 0 | `L3_normalisation/L3_normalisation.md` |
-| 4 DF écartées | N4 ville → campus : 0 violation, mais aucune règle ne l'impose : une DF observée n'est pas une DF du métier | idem |
-| Décomposition | CAMPUS, ETUDIANT, SESSION, INSCRIPTION : **BCNF** (tout déterminant est une clé, `libelle` est une 2e clé de SESSION) ; **sans perte** : 0 ligne inventée, 0 ligne perdue (`MINUS` dans les deux sens) ; dépendances préservées | idem |
+| Table à plat `OPERATION_A_PLAT` (opération + étudiant + session + 2 campus) | 354 855 lignes, 28 colonnes, 88 Mo (23 Mo décomposée). Anomalies constatées : le siège ne peut pas y figurer (insertion), 16 lignes par e-mail à modifier (modification), une session disparaît avec sa dernière opération (suppression) | `L3_normalisation/05_normalisation.sql` |
+| 8 DF retenues, vérifiées par requête (violations comptées) | D5 e-mail → étudiant : 73 violations sur le CSV brut, 0 après le L2 ; D6 (session, places) → montant : 88, puis 0 ; D7 groupe → étudiant : 9, puis 0 | `L3_normalisation/L3_normalisation.md` |
+| 5 DF écartées | N4 ville → campus et N5 libellé → session : 0 violation, mais aucune règle ne les impose (le libellé est fabriqué à partir de l'identifiant) : une DF observée n'est pas une DF du métier | idem |
+| Décomposition théorique | CAMPUS, ETUDIANT, SESSION, OPERATION_GROUPEE, INSCRIPTION (sans montant) : **BCNF** (tout déterminant est une clé) ; **sans perte** : 0 ligne inventée, 0 ligne perdue (`MINUS` dans les deux sens) ; dépendances préservées | idem |
+| Base réelle | toutes les tables en BCNF sauf INSCRIPTION, en **2NF par choix** : trois dépendances transitives assumées (site, montant, parcours), chacune tenue par un mécanisme de la base | idem |
 | **Dénormalisation assumée** : `INSCRIPTION.id_site` (le site de la session, recopié) | tenue par une clé étrangère composite vers `(id_session, id_campus)` et le trigger `trg_inscription_site` : jamais incohérente (déplacer une session qui a des inscriptions est refusé, ORA-02292). Lecture : 2 391 → 2 266 blocs (−5 %). Raison principale : fragmenter par site au L6 sans jointure | `L3_normalisation/L3_denormalisation.sql`, `preuves/L3_denormalisation.txt` |
 
-Écarts volontaires à la 3NF stricte : `montant` est gardé (c'est le prix payé le jour de l'opération : un changement de prix ultérieur ne doit pas modifier l'historique ni C5), et l'entité OPERATION_GROUPEE (D8, D9) n'est pas créée (le parcours est tenu par le package du L4). Une première exploration en Python (Younes) est gardée dans le même dossier ; elle n'est pas rejouable sur le kit et a été reprise en SQL.
+**Justification des deux autres écarts.**
+- **`montant` gardé** : D6 n'est vraie qu'au moment de l'opération. Le montant est le prix payé ce jour-là ; si le prix d'une session change ensuite, les anciennes inscriptions gardent leur montant, sinon le chiffre d'affaires passé (C5) changerait. C'est un fait historique, pas une copie. À l'insertion, le trigger du L4 le calcule.
+- **Opération groupée gardée dans INSCRIPTION** : une table OPERATION_GROUPEE ne contiendrait que l'étudiant et le statut, déjà présents sur chaque inscription (3 lignes par parcours en moyenne). Le tout ou rien est garanti par la transaction du package du L4, pas par une table. Et avec la fragmentation du L6, une table à part devrait vivre sur un seul site : chaque parcours multi-sites toucherait une base de plus. Limite assumée : D7 et D8 sont tenues par le package, pas par une contrainte ; contrôle par requête, 0 violation.
+
+Une première exploration en Python (Younes) est gardée dans `L3_normalisation/exploration_python/` ; elle n'est pas rejouable sur le kit et a été reprise en SQL.
 
 ## L4 · Fiabilité
 
@@ -277,7 +295,7 @@ L7 (`L7_nosql/elasticsearch/`), ADR-01 (localisation de l'étudiant), L5 (VPD).
 
 # Annexes
 
-## Annexe A · Requêtes des valeurs de contrôle (`sql/03_valeurs_controle.sql`)
+## Annexe A · Requêtes des valeurs de contrôle (`L2_chargement_requetes/03_valeurs_controle.sql`)
 
 ```sql
 -- =====================================================================
@@ -463,6 +481,7 @@ Les entrées les plus récentes vont en haut.
 
 | Date       | Qui      | Livrable | Type     | Ce qui s'est passé                                                                                                                                                        | Résolution / décision                                                                                                                                                                                                                 |
 | ---------- | -------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-11-27 | Baptiste | L3 | décision | Relecture du L3 : la DF « libellé → session » était retenue comme 2e clé de SESSION, alors que les libellés sont fabriqués à partir de l'identifiant (« Session FLE 1 ») et qu'aucune contrainte `UNIQUE` ne la garantit. Le document annonçait aussi INSCRIPTION en BCNF alors qu'elle garde le site, le montant et le parcours, et renvoyait l'opération groupée à un ADR qui ne la traite pas | DF déplacée dans les DF écartées (N5, même raisonnement que N4), numérotation D5 à D8 décalée. Forme normale réelle écrite : décomposition théorique en BCNF, INSCRIPTION en 2NF par choix ; les trois écarts (site, montant historisé, parcours) justifiés dans `L3_normalisation.md`, partie 4. Ajout du contrôle D8 après chargement (0 violation) |
 | 2026-11-26 | Baptiste | — | erreur | Relance sur un kit neuf (comptes supprimés, `installation_system.sql`, puis `run_all.sql`) après la réorganisation des dossiers (PR #11, #12) : seuls L1 et L2 étaient reconstruits. Dans `prerequis/run_all.sql`, les étapes 05 à 11 étaient commentées, 03 et 04 marquées « à enlever », et les chemins visaient l'ancien dossier `sql/` | Chemins relatifs corrigés depuis `prerequis/` (`@@../L1_modele/…`, `@@../sql/…`), toutes les étapes réactivées, recompilation finale du schéma. Kit neuf : 1 min 06 s, 0 erreur ORA/SP2/PLS, 0 objet invalide. Preuves manuelles rejouées : L3, L4 (14 tests, concurrence), L5, L6 (18 OK), MongoDB, Elasticsearch, Neo4j |
 | 2026-11-26 | Baptiste | L2 | erreur | `04_requetes_metier.sql` dans `run_all` : plus de 10 min, `run_all.log` de 230 000 lignes (R2, R3, R4, R5, R6, R8 affichaient toutes leurs lignes) ; R5 (division en double `NOT EXISTS`) seule tournait encore après 5 min | Sorties bornées (totaux ou `FETCH FIRST 10`), résultats écrits en commentaire. R5 : pas d'index sur `INSCRIPTION.id_etudiant` avant le L5, Oracle relisait la table pour chaque couple étudiant × langue ; couples manquants construits dans un seul bloc → anti-jointure par hachage, 0,15 s, 12 985 (= division par comptage). R3 sur les étudiants : 0 ligne, remplacée par les sessions sans inscrit (4) |
 | 2026-11-26 | Baptiste | L7 | erreur | `docker exec elasticsearch bash /tmp/L7_recherche.sh` : `$'

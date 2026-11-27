@@ -136,64 +136,61 @@ FROM  (SELECT id_campus
               FROM operation_a_plat WHERE id_campus_session IS NOT NULL)
        GROUP BY id_campus HAVING COUNT(*) > 1)
 UNION ALL
-SELECT 'D5', 'libelle_session -> id_session',
-       COUNT(*), 'tient : le libellé est une 2e clé de SESSION'
-FROM  (SELECT libelle_session
-       FROM  (SELECT DISTINCT libelle_session, id_session FROM operation_a_plat
-              WHERE libelle_session IS NOT NULL)
-       GROUP BY libelle_session HAVING COUNT(*) > 1)
-UNION ALL
-SELECT 'D6', 'email normalisé (minuscules, sans espaces) -> id_etudiant',
+SELECT 'D5', 'email normalisé (minuscules, sans espaces) -> id_etudiant',
        COUNT(*), 'violée par les 73 copies : fusion au L2 (RG4)'
 FROM  (SELECT LOWER(REPLACE(email, ' ', ''))
        FROM  (SELECT DISTINCT email, id_etudiant FROM operation_a_plat WHERE email IS NOT NULL)
        GROUP BY LOWER(REPLACE(email, ' ', '')) HAVING COUNT(DISTINCT id_etudiant) > 1)
 UNION ALL
-SELECT 'D7', 'id_session, nb_places -> montant',
+SELECT 'D6', 'id_session, nb_places -> montant',
        COUNT(*), 'violée par des opérations non valides (rejetées au L2)'
 FROM  (SELECT id_session, nb_places
        FROM  (SELECT DISTINCT id_session, nb_places, montant FROM operation_a_plat)
        GROUP BY id_session, nb_places HAVING COUNT(*) > 1)
 UNION ALL
-SELECT 'D8', 'id_groupe -> id_etudiant',
+SELECT 'D7', 'id_groupe -> id_etudiant',
        COUNT(*), 'violée par des copies d''étudiants : tient après fusion'
 FROM  (SELECT id_groupe
        FROM  (SELECT DISTINCT id_groupe, id_etudiant FROM operation_a_plat
               WHERE id_groupe IS NOT NULL)
        GROUP BY id_groupe HAVING COUNT(*) > 1)
 UNION ALL
-SELECT 'D9', 'id_groupe -> statut',
+SELECT 'D8', 'id_groupe -> statut',
        COUNT(*), 'tient : un parcours est confirmé ou annulé en entier'
 FROM  (SELECT id_groupe
        FROM  (SELECT DISTINCT id_groupe, statut FROM operation_a_plat WHERE id_groupe IS NOT NULL)
        GROUP BY id_groupe HAVING COUNT(*) > 1)
 ORDER BY 1;
 -- Résultat :
---   D1  0      D2  0      D3  0      D4  0      D5  0
---   D6  73     D7  88     D8  9      D9  0
---   D6 : les 73 copies d'étudiants (même e-mail une fois normalisé, id différent).
---   D7 : 80 sessions où un montant négatif côtoie le bon montant (le négatif vaut
+--   D1  0      D2  0      D3  0      D4  0
+--   D5  73     D6  88     D7  9      D8  0
+--   D5 : les 73 copies d'étudiants (même e-mail une fois normalisé, id différent).
+--   D6 : 80 sessions où un montant négatif côtoie le bon montant (le négatif vaut
 --        exactement -nb_places x prix), + 8 id de session inexistants vus avec plusieurs
 --        montants. Ce sont les opérations non valides du sujet.
---   D8 : 9 parcours passés en partie sous l'id d'une copie : même personne, deux id.
+--   D7 : 9 parcours passés en partie sous l'id d'une copie : même personne, deux id.
 
 -- 2b. Les mêmes DF après le chargement du L2 (tables nettoyées) : plus aucune violation
-SELECT 'D6' AS n, 'email -> id_etudiant (ETUDIANT)' AS dependance, COUNT(*) AS violations
+SELECT 'D5' AS n, 'email -> id_etudiant (ETUDIANT)' AS dependance, COUNT(*) AS violations
 FROM  (SELECT email FROM etudiant WHERE email IS NOT NULL GROUP BY email HAVING COUNT(*) > 1)
 UNION ALL
-SELECT 'D7', 'id_session, nb_places -> montant (INSCRIPTION)', COUNT(*)
+SELECT 'D6', 'id_session, nb_places -> montant (INSCRIPTION)', COUNT(*)
 FROM  (SELECT id_session, nb_places FROM inscription
        GROUP BY id_session, nb_places HAVING COUNT(DISTINCT montant) > 1)
 UNION ALL
-SELECT 'D7b', 'montant = nb_places x prix_unitaire (INSCRIPTION, RG12)', COUNT(*)
+SELECT 'D6b', 'montant = nb_places x prix_unitaire (INSCRIPTION, RG12)', COUNT(*)
 FROM   inscription i JOIN session_cours s ON s.id_session = i.id_session
 WHERE  i.montant <> i.nb_places * s.prix_unitaire
 UNION ALL
-SELECT 'D8', 'id_groupe -> id_etudiant (INSCRIPTION)', COUNT(*)
+SELECT 'D7', 'id_groupe -> id_etudiant (INSCRIPTION)', COUNT(*)
 FROM  (SELECT id_groupe FROM inscription WHERE id_groupe IS NOT NULL
        GROUP BY id_groupe HAVING COUNT(DISTINCT id_etudiant) > 1)
+UNION ALL
+SELECT 'D8', 'id_groupe -> statut (INSCRIPTION)', COUNT(*)
+FROM  (SELECT id_groupe FROM inscription WHERE id_groupe IS NOT NULL
+       GROUP BY id_groupe HAVING COUNT(DISTINCT statut) > 1)
 ORDER BY 1;
--- Résultat : 0 partout. D7b : le montant se recalcule toujours à partir de la session
+-- Résultat : 0 partout. D6b : le montant se recalcule toujours à partir de la session
 -- (c'est la redondance discutée dans la doc, partie dénormalisation).
 
 -- 2c. Dépendances qu'on pourrait croire vraies, et qu'on ne retient pas
@@ -219,11 +216,21 @@ SELECT 'N4', 'ville (de l''étudiant) -> id_campus_etudiant', COUNT(*),
 FROM  (SELECT ville
        FROM  (SELECT DISTINCT ville, id_campus_etudiant FROM operation_a_plat)
        GROUP BY ville HAVING COUNT(*) > 1)
+UNION ALL
+SELECT 'N5', 'libelle_session -> id_session', COUNT(*),
+       'tient dans les données, pas une règle : non retenue'
+FROM  (SELECT libelle_session
+       FROM  (SELECT DISTINCT libelle_session, id_session FROM operation_a_plat
+              WHERE libelle_session IS NOT NULL)
+       GROUP BY libelle_session HAVING COUNT(*) > 1)
 ORDER BY 1;
--- Résultat : N1 12 369, N2 75, N3 6, N4 0
+-- Résultat : N1 12 369, N2 75, N3 6, N4 0, N5 0
 --   N2 : 73 téléphones partagés par une copie et son original, 2 par deux vraies personnes.
 --   N4 : coïncidence du jeu de données (chaque étudiant habite la ville de son campus) ;
 --        aucune règle ne l'impose, un étudiant peut habiter ailleurs. Non retenue.
+--   N5 : le libellé est fabriqué à partir de l'identifiant (« Session FLE 1 ») : il est
+--        unique par construction du fichier, pas par une règle de l'école. Aucune
+--        contrainte UNIQUE ne le garantit au L1. Non retenue : SESSION n'a qu'une clé.
 
 
 -- ---------------------------------------------------------------------
@@ -292,7 +299,7 @@ FROM dual;
 -- 4. Dénormalisation assumée : le site de la session recopié dans INSCRIPTION
 --    En 3NF, le site d'une opération se déduit par jointure (RG10, vue V_INSCRIPTION_SITE).
 --    On le recopie dans INSCRIPTION.id_site, car C5, C6, C8 et la répartition des données
---    par site (L5, L6) en ont besoin sans passer par SESSION_COURS. Justification et
+--    par site (fragmentation du L6) en ont besoin sans passer par SESSION_COURS. Justification et
 --    mesures : L3_normalisation/L3_normalisation.md.
 --
 --    Cohérence garantie de deux façons :
